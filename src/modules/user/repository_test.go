@@ -101,3 +101,33 @@ func TestEmailMustBeLowercase(t *testing.T) {
 		t.Fatal("uppercase email accepted")
 	}
 }
+
+func TestRecordFailureRestartsAfterExpiredLock(t *testing.T) {
+	db := database.TestTx(t)
+	repo := user.NewRepository(db)
+	ctx := context.Background()
+	u := seed(t, db, "expired@example.com")
+
+	fail := func(n int) user.User {
+		t.Helper()
+		for range n {
+			if err := repo.RecordFailure(ctx, u.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return reload(t, db, u.ID)
+	}
+
+	if got := fail(5); got.FailedAttempts != 5 || got.LockedUntil == nil {
+		t.Fatalf("after 5: attempts=%d locked=%v", got.FailedAttempts, got.LockedUntil)
+	}
+	if err := db.Model(&user.User{}).Where("id = ?", u.ID).Update("locked_until", time.Now().Add(-time.Second)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got := fail(1); got.FailedAttempts != 1 || got.LockedUntil != nil {
+		t.Fatalf("after expiry: attempts=%d locked=%v", got.FailedAttempts, got.LockedUntil)
+	}
+	if got := fail(4); got.FailedAttempts != 5 || got.LockedFor(time.Now()) <= 14*time.Minute {
+		t.Fatalf("after 4 more: attempts=%d locked=%v", got.FailedAttempts, got.LockedUntil)
+	}
+}

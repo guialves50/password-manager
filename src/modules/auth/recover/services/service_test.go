@@ -3,150 +3,145 @@ package services
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	autherrors "github.com/guialves50/password-manager/src/modules/auth/errors"
 	"github.com/guialves50/password-manager/src/modules/auth/keys"
+	prelogin "github.com/guialves50/password-manager/src/modules/auth/prelogin/dto"
 	"github.com/guialves50/password-manager/src/modules/auth/recover/dto"
-	"github.com/guialves50/password-manager/src/modules/user"
 )
 
 var testParams = keys.Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}
-
-type rotation struct {
-	id                                                           uint64
-	verified, masterSalt, masterBlob, recoverySalt, recoveryBlob []byte
-}
-
-type fakeRepo struct {
-	u         *user.User
-	findErr   error
-	queried   string
-	finds     int
-	failures  []uint64
-	rotated   []rotation
-	rotateErr error
-}
-
-func (f *fakeRepo) FindByEmail(_ context.Context, email string) (*user.User, error) {
-	f.finds++
-	f.queried = email
-	if f.u == nil || f.u.Email != email {
-		return nil, f.findErr
-	}
-	return f.u, f.findErr
-}
-
-func (f *fakeRepo) RecordFailure(_ context.Context, id uint64) error {
-	f.failures = append(f.failures, id)
-	return nil
-}
-
-func (f *fakeRepo) RotateKeys(_ context.Context, id uint64, verified, ms, mb, rs, rb []byte) error {
-	f.rotated = append(f.rotated, rotation{id, verified, ms, mb, rs, rb})
-	return f.rotateErr
-}
-
-type deriveSpy struct {
-	calls  int
-	params []keys.Params
-}
-
-func (d *deriveSpy) derive(secret, salt []byte, p keys.Params) []byte {
-	d.calls++
-	d.params = append(d.params, p)
-	return keys.Derive(secret, salt, p)
-}
-
-func seedUser(t *testing.T, email, pw string) (*user.User, []byte, string) {
-	t.Helper()
-	vk, _ := keys.Random(32)
-	ms, _ := keys.Random(16)
-	rs, _ := keys.Random(16)
-	rk, _ := keys.NewRecoveryKey()
-	mb, err := keys.Seal(keys.Derive([]byte(pw), ms, testParams), vk, []byte("pm/master/v1|"+email))
-	if err != nil {
-		t.Fatal(err)
-	}
-	rb, err := keys.Seal(keys.Derive(keys.NormalizeRecoveryKey([]byte(rk)), rs, testParams), vk, []byte("pm/recovery/v1|"+email))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return &user.User{
-		ID: 42, Email: email,
-		KDFTime: testParams.Time, KDFMemoryKiB: testParams.MemoryKiB, KDFThreads: testParams.Threads,
-		MasterSalt: ms, MasterWrappedKey: mb, RecoverySalt: rs, RecoveryWrappedKey: rb,
-	}, vk, rk
-}
-
-func newService(repo *fakeRepo) (*Service, *deriveSpy) {
-	spy := &deriveSpy{}
-	return &Service{Repo: repo, Params: keys.Params{Time: 2, MemoryKiB: 8 * 1024, Threads: 1}, Derive: spy.derive}, spy
-}
 
 func input(email, rk, pw, confirm string) dto.Input {
 	return dto.Input{Email: email, RecoveryKey: []byte(rk), Password: []byte(pw), Confirm: []byte(confirm)}
 }
 
-func TestRecoverRotatesKeys(t *testing.T) {
-	u, vk, oldKey := seedUser(t, "alice@example.com", "SenhaAntiga1")
-	u.FailedAttempts = 3
-	oldMasterSalt, oldRecoverySalt := u.MasterSalt, u.RecoverySalt
-	repo := &fakeRepo{u: u}
-	svc, _ := newService(repo)
+type fakeAPI struct {
+	email                       string
+	recoverySalt, recoveryBlob  []byte
+	recoveryAuth                []byte
+	preErr, startErr, finishErr error
+	prelogins, starts, finishes int
+	finished                    dto.FinishRequest
+	raw                         [][]byte
+}
+
+func (f *fakeAPI) Prelogin(_ context.Context, email string) (prelogin.Response, error) {
+	f.prelogins++
+	raw, _ := json.Marshal(prelogin.Request{Email: email})
+	f.raw = append(f.raw, raw)
+	kdf := prelogin.KDF{Time: testParams.Time, MemoryKiB: testParams.MemoryKiB, Threads: testParams.Threads}
+	return prelogin.Response{KDF: kdf, MasterSalt: bytes.Repeat([]byte{1}, 16), RecoverySalt: f.recoverySalt}, f.preErr
+}
+
+func (f *fakeAPI) RecoverStart(_ context.Context, req dto.StartRequest) (dto.StartResponse, error) {
+	f.starts++
+	raw, _ := json.Marshal(req)
+	f.raw = append(f.raw, raw)
+	if f.startErr != nil {
+		return dto.StartResponse{}, f.startErr
+	}
+	if req.Email != f.email || !bytes.Equal(req.RecoveryAuthHash, f.recoveryAuth) {
+		return dto.StartResponse{}, autherrors.ErrInvalidRecovery
+	}
+	return dto.StartResponse{RecoveryBlob: f.recoveryBlob}, nil
+}
+
+func (f *fakeAPI) RecoverFinish(_ context.Context, req dto.FinishRequest) error {
+	f.finishes++
+	raw, _ := json.Marshal(req)
+	f.raw = append(f.raw, raw)
+	f.finished = req
+	f.finished.RecoveryAuthHash = bytes.Clone(req.RecoveryAuthHash)
+	f.finished.AuthHash = bytes.Clone(req.AuthHash)
+	f.finished.NewRecoveryAuthHash = bytes.Clone(req.NewRecoveryAuthHash)
+	return f.finishErr
+}
+
+func seed(t *testing.T, email string) (*fakeAPI, []byte, string) {
+	t.Helper()
+	vk, _ := keys.Random(32)
+	rs, _ := keys.Random(16)
+	rk, _ := keys.NewRecoveryKey()
+	blob, auth, err := keys.Wrap(keys.NormalizeRecoveryKey([]byte(rk)), rs, testParams, vk, []byte("pm/recovery/v1|"+email))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &fakeAPI{email: email, recoverySalt: rs, recoveryBlob: blob, recoveryAuth: auth}, vk, rk
+}
+
+func assertNoSecrets(t *testing.T, payloads [][]byte, secrets map[string][]byte) {
+	t.Helper()
+	for _, payload := range payloads {
+		for name, s := range secrets {
+			for _, form := range []string{string(s), hex.EncodeToString(s), base64.StdEncoding.EncodeToString(s), base64.RawStdEncoding.EncodeToString(s), base64.RawURLEncoding.EncodeToString(s)} {
+				if strings.Contains(string(payload), form) {
+					t.Fatalf("request contains the %s: %s", name, payload)
+				}
+			}
+		}
+	}
+}
+
+func TestRecoverRotatesThroughServer(t *testing.T) {
+	api, vk, oldKey := seed(t, "alice@example.com")
 	messy := " " + strings.ToLower(strings.ReplaceAll(oldKey, "-", " ")) + " "
 	in := input(" Alice@Example.com ", messy, "SenhaNova1", "SenhaNova1")
 
-	out, err := svc.Recover(context.Background(), in)
+	out, err := (&Service{API: api}).Recover(context.Background(), in)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !regexp.MustCompile(`^[A-Z2-7]{4}(-[A-Z2-7]{4}){7}$`).MatchString(out.RecoveryKey) || out.RecoveryKey == oldKey {
 		t.Fatalf("new recovery key %q (old %q)", out.RecoveryKey, oldKey)
 	}
-	if repo.queried != "alice@example.com" || len(repo.rotated) != 1 || len(repo.failures) != 0 {
-		t.Fatalf("queried %q rotated %d failures %v", repo.queried, len(repo.rotated), repo.failures)
+	if api.prelogins != 1 || api.starts != 1 || api.finishes != 1 {
+		t.Fatalf("calls %d %d %d", api.prelogins, api.starts, api.finishes)
 	}
-	r := repo.rotated[0]
-	if r.id != 42 || len(r.masterSalt) != 16 || len(r.recoverySalt) != 16 {
-		t.Fatalf("rotation %+v", r)
+	f := api.finished
+	if f.Email != "alice@example.com" || !bytes.Equal(f.RecoveryAuthHash, api.recoveryAuth) {
+		t.Fatalf("finish not authenticated with the old recovery auth hash: %+v", f)
 	}
-	if !bytes.Equal(r.verified, u.RecoveryWrappedKey) {
-		t.Fatal("rotation not conditioned on the verified recovery blob")
-	}
-	if bytes.Equal(r.masterSalt, oldMasterSalt) || bytes.Equal(r.recoverySalt, oldRecoverySalt) || bytes.Equal(r.masterSalt, r.recoverySalt) {
+	if len(f.MasterSalt) != 16 || len(f.RecoverySalt) != 16 || bytes.Equal(f.MasterSalt, f.RecoverySalt) || bytes.Equal(f.RecoverySalt, api.recoverySalt) {
 		t.Fatal("salts not renewed")
 	}
+	if len(f.MasterBlob) != 60 || len(f.RecoveryBlob) != 60 || len(f.AuthHash) != 32 || len(f.NewRecoveryAuthHash) != 32 || bytes.Equal(f.NewRecoveryAuthHash, api.recoveryAuth) {
+		t.Fatalf("finish fields %+v", f)
+	}
 
-	v1, err := keys.Open(keys.Derive([]byte("SenhaNova1"), r.masterSalt, testParams), r.masterBlob, []byte("pm/master/v1|alice@example.com"))
-	if err != nil {
+	master := keys.Derive([]byte("SenhaNova1"), f.MasterSalt, testParams)
+	auth, enc, _ := keys.Split(master)
+	v1, err := keys.Open(enc, f.MasterBlob, []byte("pm/master/v1|alice@example.com"))
+	if err != nil || !bytes.Equal(auth, f.AuthHash) {
 		t.Fatalf("new master blob: %v", err)
 	}
-	v2, err := keys.Open(keys.Derive(keys.NormalizeRecoveryKey([]byte(out.RecoveryKey)), r.recoverySalt, testParams), r.recoveryBlob, []byte("pm/recovery/v1|alice@example.com"))
-	if err != nil {
+	newSecret := keys.NormalizeRecoveryKey([]byte(out.RecoveryKey))
+	recMaster := keys.Derive(newSecret, f.RecoverySalt, testParams)
+	recAuth, recEnc, _ := keys.Split(recMaster)
+	v2, err := keys.Open(recEnc, f.RecoveryBlob, []byte("pm/recovery/v1|alice@example.com"))
+	if err != nil || !bytes.Equal(recAuth, f.NewRecoveryAuthHash) {
 		t.Fatalf("new recovery blob: %v", err)
 	}
 	if !bytes.Equal(v1, vk) || !bytes.Equal(v2, vk) {
 		t.Fatal("vault key changed")
 	}
-	if _, err := keys.Open(keys.Derive([]byte("SenhaAntiga1"), r.masterSalt, testParams), r.masterBlob, []byte("pm/master/v1|alice@example.com")); err == nil {
-		t.Fatal("old password opens new master blob")
-	}
-	if _, err := keys.Open(keys.Derive(keys.NormalizeRecoveryKey([]byte(oldKey)), r.recoverySalt, testParams), r.recoveryBlob, []byte("pm/recovery/v1|alice@example.com")); err == nil {
-		t.Fatal("old recovery key opens new recovery blob")
-	}
 
-	for _, field := range [][]byte{r.masterSalt, r.masterBlob, r.recoverySalt, r.recoveryBlob} {
-		for _, s := range [][]byte{[]byte("SenhaNova1"), []byte(out.RecoveryKey), keys.NormalizeRecoveryKey([]byte(out.RecoveryKey)), vk} {
-			if bytes.Contains(field, s) {
-				t.Fatalf("secret %q stored in clear", s)
-			}
-		}
-	}
+	oldSecret := keys.NormalizeRecoveryKey([]byte(oldKey))
+	oldMaster := keys.Derive(oldSecret, api.recoverySalt, testParams)
+	_, oldEnc, _ := keys.Split(oldMaster)
+	assertNoSecrets(t, api.raw, map[string][]byte{
+		"new password": []byte("SenhaNova1"), "old recovery key": []byte(oldKey), "old normalized recovery key": oldSecret,
+		"new recovery key": []byte(out.RecoveryKey), "new normalized recovery key": newSecret, "vault key": vk,
+		"master key": master, "encKey": enc, "old recovery master key": oldMaster, "old recovery encKey": oldEnc,
+		"new recovery master key": recMaster, "new recovery encKey": recEnc,
+	})
 	for _, b := range [][]byte{in.RecoveryKey, in.Password, in.Confirm} {
 		if !bytes.Equal(b, make([]byte, len(b))) {
 			t.Fatal("input secrets not zeroed")
@@ -154,7 +149,7 @@ func TestRecoverRotatesKeys(t *testing.T) {
 	}
 }
 
-func TestRecoverPolicyErrorsTouchNothing(t *testing.T) {
+func TestRecoverPolicyErrorsSendNothing(t *testing.T) {
 	cases := []struct {
 		name string
 		in   dto.Input
@@ -165,110 +160,57 @@ func TestRecoverPolicyErrorsTouchNothing(t *testing.T) {
 		{"lowercase", input("alice@example.com", "x", "senhafraca", "senhafraca"), autherrors.ErrPasswordCase},
 		{"uppercase", input("alice@example.com", "x", "SENHAFRACA", "SENHAFRACA"), autherrors.ErrPasswordCase},
 		{"mismatch", input("alice@example.com", "x", "SenhaNova1", "SenhaNova2"), autherrors.ErrPasswordMismatch},
+		{"invalid email", input("not-an-email", "x", "SenhaNova1", "SenhaNova1"), autherrors.ErrInvalidRecovery},
 	}
 	for _, c := range cases {
-		u, _, _ := seedUser(t, "alice@example.com", "SenhaAntiga1")
-		repo := &fakeRepo{u: u}
-		svc, spy := newService(repo)
-		_, err := svc.Recover(context.Background(), c.in)
-		if err != c.want {
-			t.Errorf("%s: got %v, want %v", c.name, err, c.want)
-		}
-		if repo.finds != 0 || spy.calls != 0 || len(repo.failures) != 0 || len(repo.rotated) != 0 {
-			t.Errorf("%s: finds %d derive %d failures %v rotated %d", c.name, repo.finds, spy.calls, repo.failures, len(repo.rotated))
+		api, _, _ := seed(t, "alice@example.com")
+		_, err := (&Service{API: api}).Recover(context.Background(), c.in)
+		if err != c.want || len(api.raw) != 0 {
+			t.Errorf("%s: got %v, requests %d", c.name, err, len(api.raw))
 		}
 	}
 }
 
-func TestRecoverWrongKeyRecordsFailure(t *testing.T) {
-	u, _, _ := seedUser(t, "alice@example.com", "SenhaAntiga1")
+func TestRecoverWrongKeyNeverFinishes(t *testing.T) {
+	api, _, _ := seed(t, "alice@example.com")
 	other, _ := keys.NewRecoveryKey()
-	repo := &fakeRepo{u: u}
-	svc, spy := newService(repo)
+	out, err := (&Service{API: api}).Recover(context.Background(), input("alice@example.com", other, "SenhaNova1", "SenhaNova1"))
+	if !errors.Is(err, autherrors.ErrInvalidRecovery) || out.RecoveryKey != "" || api.finishes != 0 {
+		t.Fatalf("got %q, %v, finishes %d", out.RecoveryKey, err, api.finishes)
+	}
+	assertNoSecrets(t, api.raw, map[string][]byte{"recovery key": []byte(other), "normalized recovery key": keys.NormalizeRecoveryKey([]byte(other))})
+}
 
-	out, err := svc.Recover(context.Background(), input("alice@example.com", other, "SenhaNova1", "SenhaNova1"))
-	if err != autherrors.ErrInvalidRecovery || out.RecoveryKey != "" {
-		t.Fatalf("got %q, %v", out.RecoveryKey, err)
+func TestRecoverServerErrorsPropagate(t *testing.T) {
+	cases := []struct {
+		name                        string
+		preErr, startErr, finishErr error
+		finishes                    int
+	}{
+		{"unreachable", autherrors.ErrUnreachable, nil, nil, 0},
+		{"locked", nil, &autherrors.LockedError{Minutes: 15}, nil, 0},
+		{"unknown email", nil, autherrors.ErrInvalidRecovery, nil, 0},
+		{"concurrent rotation", nil, nil, autherrors.ErrInvalidRecovery, 1},
+		{"internal", nil, nil, errors.New("api: status 500"), 1},
 	}
-	if len(repo.failures) != 1 || repo.failures[0] != 42 || len(repo.rotated) != 0 {
-		t.Fatalf("failures %v rotated %d", repo.failures, len(repo.rotated))
-	}
-	if spy.calls != 1 || spy.params[0] != testParams {
-		t.Fatalf("derive calls %d params %v", spy.calls, spy.params)
+	for _, c := range cases {
+		api, _, rk := seed(t, "alice@example.com")
+		api.preErr, api.startErr, api.finishErr = c.preErr, c.startErr, c.finishErr
+		want := errors.Join(c.preErr, c.startErr, c.finishErr)
+		out, err := (&Service{API: api}).Recover(context.Background(), input("alice@example.com", rk, "SenhaNova1", "SenhaNova1"))
+		if err == nil || autherrors.Message(err) != autherrors.Message(want) || out.RecoveryKey != "" || api.finishes != c.finishes {
+			t.Errorf("%s: got %q, %v, finishes %d", c.name, out.RecoveryKey, err, api.finishes)
+		}
 	}
 }
 
 func TestRecoverBlobBoundToEmail(t *testing.T) {
-	u, _, rk := seedUser(t, "alice@example.com", "SenhaAntiga1")
-	u.Email = "bob@example.com"
-	repo := &fakeRepo{u: u}
-	svc, _ := newService(repo)
-
-	if _, err := svc.Recover(context.Background(), input("bob@example.com", rk, "SenhaNova1", "SenhaNova1")); err != autherrors.ErrInvalidRecovery || len(repo.failures) != 1 {
-		t.Fatalf("err %v failures %v", err, repo.failures)
-	}
-}
-
-func TestRecoverUnknownEmailRunsDummyDerive(t *testing.T) {
-	for _, email := range []string{"ghost@example.com", "not-an-email"} {
-		repo := &fakeRepo{}
-		svc, spy := newService(repo)
-		_, err := svc.Recover(context.Background(), input(email, "AAAA-BBBB", "SenhaNova1", "SenhaNova1"))
-		if err != autherrors.ErrInvalidRecovery {
-			t.Fatalf("%s: got %v", email, err)
-		}
-		if spy.calls != 1 || spy.params[0] != svc.Params {
-			t.Fatalf("%s: derive calls %d params %v", email, spy.calls, spy.params)
-		}
-		if len(repo.failures) != 0 || len(repo.rotated) != 0 {
-			t.Fatalf("%s: failures %v rotated %d", email, repo.failures, len(repo.rotated))
-		}
-	}
-}
-
-func TestRecoverLockedSkipsDerive(t *testing.T) {
-	cases := []struct {
-		remaining time.Duration
-		want      int
-	}{
-		{14*time.Minute + 30*time.Second, 15},
-		{61 * time.Second, 2},
-		{10 * time.Second, 1},
-	}
-	for _, c := range cases {
-		u, _, rk := seedUser(t, "alice@example.com", "SenhaAntiga1")
-		until := time.Now().Add(c.remaining)
-		u.LockedUntil = &until
-		repo := &fakeRepo{u: u}
-		svc, spy := newService(repo)
-
-		_, err := svc.Recover(context.Background(), input("alice@example.com", rk, "SenhaNova1", "SenhaNova1"))
-		var locked *autherrors.LockedError
-		if !errors.As(err, &locked) || locked.Minutes != c.want {
-			t.Fatalf("%v: got %v", c.remaining, err)
-		}
-		if spy.calls != 0 || len(repo.failures) != 0 || len(repo.rotated) != 0 {
-			t.Fatalf("%v: derive %d failures %v rotated %d", c.remaining, spy.calls, repo.failures, len(repo.rotated))
-		}
-	}
-}
-
-func TestRecoverRepoErrorPropagates(t *testing.T) {
-	boom := errors.New("db down")
-	svc, _ := newService(&fakeRepo{findErr: boom})
-	if _, err := svc.Recover(context.Background(), input("alice@example.com", "x", "SenhaNova1", "SenhaNova1")); !errors.Is(err, boom) {
-		t.Fatalf("got %v", err)
-	}
-}
-
-func TestRecoverRotateFailureReturnsNoKey(t *testing.T) {
-	u, _, oldKey := seedUser(t, "alice@example.com", "SenhaAntiga1")
-	rotateErr := errors.New("0 rows")
-	repo := &fakeRepo{u: u, rotateErr: rotateErr}
-	svc, _ := newService(repo)
-
-	out, err := svc.Recover(context.Background(), input("alice@example.com", oldKey, "SenhaNova1", "SenhaNova1"))
-	if !errors.Is(err, rotateErr) || out.RecoveryKey != "" {
-		t.Fatalf("err %v key %q", err, out.RecoveryKey)
+	api, _, rk := seed(t, "alice@example.com")
+	api.email = "bob@example.com"
+	_, auth, _ := keys.Wrap(keys.NormalizeRecoveryKey([]byte(rk)), api.recoverySalt, testParams, make([]byte, 32), nil)
+	api.recoveryAuth = auth
+	out, err := (&Service{API: api}).Recover(context.Background(), input("bob@example.com", rk, "SenhaNova1", "SenhaNova1"))
+	if err == nil || out.RecoveryKey != "" || api.finishes != 0 {
+		t.Fatalf("got %q, %v, finishes %d", out.RecoveryKey, err, api.finishes)
 	}
 }

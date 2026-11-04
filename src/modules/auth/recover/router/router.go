@@ -22,6 +22,6 @@ func (s store) RotateKeys(ctx context.Context, id uint64, verifiedRecoveryBlob, 
 }
 
 func Routes(db *gorm.DB) map[string]cli.Command {
-	svc := &services.Service{Repo: store{user.NewRepository(db), repository.New(db)}, Params: keys.DefaultParams, Derive: keys.Derive}
+	svc := &services.DBService{Repo: store{user.NewRepository(db), repository.New(db)}, Params: keys.DefaultParams, Derive: keys.Derive}
 	return map[string]cli.Command{"recover": controllers.New(svc.Recover)}
 }

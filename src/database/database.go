@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/guialves50/password-manager/src/modules/user"
+	"github.com/guialves50/password-manager/src/modules/vault/items/repository"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -18,5 +19,5 @@ func Connect() (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return db, db.AutoMigrate(&user.User{})
+	return db, db.AutoMigrate(&user.User{}, &repository.Item{})
 }

@@ -23,12 +23,13 @@ type rotation struct {
 }
 
 type fakeRepo struct {
-	u        *user.User
-	findErr  error
-	queried  string
-	finds    int
-	failures []uint64
-	rotated  []rotation
+	u         *user.User
+	findErr   error
+	queried   string
+	finds     int
+	failures  []uint64
+	rotated   []rotation
+	rotateErr error
 }
 
 func (f *fakeRepo) FindByEmail(_ context.Context, email string) (*user.User, error) {
@@ -47,7 +48,7 @@ func (f *fakeRepo) RecordFailure(_ context.Context, id uint64) error {
 
 func (f *fakeRepo) RotateKeys(_ context.Context, id uint64, ms, mb, rs, rb []byte) error {
 	f.rotated = append(f.rotated, rotation{id, ms, mb, rs, rb})
-	return nil
+	return f.rotateErr
 }
 
 type deriveSpy struct {
@@ -254,5 +255,17 @@ func TestRecoverRepoErrorPropagates(t *testing.T) {
 	svc, _ := newService(&fakeRepo{findErr: boom})
 	if _, err := svc.Recover(context.Background(), input("alice@example.com", "x", "SenhaNova1", "SenhaNova1")); !errors.Is(err, boom) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRecoverRotateFailureReturnsNoKey(t *testing.T) {
+	u, _, oldKey := seedUser(t, "alice@example.com", "SenhaAntiga1")
+	rotateErr := errors.New("0 rows")
+	repo := &fakeRepo{u: u, rotateErr: rotateErr}
+	svc, _ := newService(repo)
+
+	out, err := svc.Recover(context.Background(), input("alice@example.com", oldKey, "SenhaNova1", "SenhaNova1"))
+	if !errors.Is(err, rotateErr) || out.RecoveryKey != "" {
+		t.Fatalf("err %v key %q", err, out.RecoveryKey)
 	}
 }

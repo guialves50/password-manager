@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/guialves50/password-manager/src/cli"
+	"gorm.io/gorm"
 )
 
 func TestRunDispatch(t *testing.T) {
@@ -38,5 +39,17 @@ func TestRunDispatch(t *testing.T) {
 		if got := stderr.String() == "uso: pm <register|login|recover>\n"; got != c.usage {
 			t.Errorf("%v: stderr %q", c.args, stderr.String())
 		}
+	}
+}
+
+func TestStartUnreachableDatabase(t *testing.T) {
+	var out, stderr bytes.Buffer
+	p := &cli.Prompter{In: bufio.NewReader(strings.NewReader("")), Out: &out}
+	connect := func() (*gorm.DB, error) { return nil, errors.New("dial tcp: refused") }
+	if code := start(connect, []string{"login"}, p, &stderr); code != 1 {
+		t.Fatalf("code %d", code)
+	}
+	if stderr.String() != "não foi possível conectar ao banco de dados\n" || out.Len() != 0 {
+		t.Fatalf("stderr %q out %q", stderr.String(), out.String())
 	}
 }

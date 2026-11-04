@@ -5,6 +5,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"maps"
@@ -18,6 +19,7 @@ import (
 	login "github.com/guialves50/password-manager/src/modules/auth/login/router"
 	recover "github.com/guialves50/password-manager/src/modules/auth/recover/router"
 	register "github.com/guialves50/password-manager/src/modules/auth/register/router"
+	"github.com/guialves50/password-manager/src/modules/user"
 )
 
 func fakePrompter(lines string, secrets ...string) (*cli.Prompter, *bytes.Buffer) {
@@ -59,6 +61,17 @@ func TestSmokeEndToEnd(t *testing.T) {
 		t.Fatalf("no recovery key in %q", out)
 	}
 	oldKey := m[1]
+
+	u, err := user.NewRepository(db).FindByEmail(context.Background(), email)
+	if err != nil || u == nil {
+		t.Fatalf("reload: %+v, %v", u, err)
+	}
+	if u.KDFTime != 3 || u.KDFMemoryKiB != 65536 || u.KDFThreads != 4 {
+		t.Fatalf("kdf params %d/%d/%d", u.KDFTime, u.KDFMemoryKiB, u.KDFThreads)
+	}
+	if len(u.MasterSalt) != 16 || len(u.RecoverySalt) != 16 || len(u.MasterWrappedKey) != 60 || len(u.RecoveryWrappedKey) != 60 {
+		t.Fatalf("lens %d/%d/%d/%d", len(u.MasterSalt), len(u.RecoverySalt), len(u.MasterWrappedKey), len(u.RecoveryWrappedKey))
+	}
 
 	step("login", 0, "pm> ", []string{"login"}, email+"\nexit\n", "SenhaAntiga1")
 

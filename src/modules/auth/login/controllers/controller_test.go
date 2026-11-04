@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"io"
 	"strings"
@@ -48,6 +50,12 @@ func TestLoginOpensShellAndZeroesKeyOnExit(t *testing.T) {
 	o := out.String()
 	if !strings.HasSuffix(o, "pm> comando desconhecido\npm> ") || strings.Contains(o, "SenhaForte1") {
 		t.Fatalf("out %q", o)
+	}
+	vk := bytes.Repeat([]byte{9}, 32)
+	for _, leak := range []string{string(vk), hex.EncodeToString(vk), base64.StdEncoding.EncodeToString(vk), base64.RawURLEncoding.EncodeToString(vk)} {
+		if strings.Contains(o, leak) {
+			t.Fatalf("vault key leaked in output %q", o)
+		}
 	}
 	if !bytes.Equal(s.VaultKey, make([]byte, 32)) {
 		t.Fatalf("key not zeroed: %v", s.VaultKey)

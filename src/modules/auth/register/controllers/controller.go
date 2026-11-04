@@ -8,12 +8,13 @@ import (
 	autherrors "github.com/guialves50/password-manager/src/modules/auth/errors"
 	"github.com/guialves50/password-manager/src/modules/auth/keys"
 	"github.com/guialves50/password-manager/src/modules/auth/register/dto"
-	"github.com/guialves50/password-manager/src/modules/auth/register/services"
 )
 
-func New(svc *services.Service) cli.Command {
+type RegisterFunc func(ctx context.Context, in dto.Input) (dto.Output, error)
+
+func New(register RegisterFunc) cli.Command {
 	return func(ctx context.Context, p *cli.Prompter) error {
-		out, err := run(ctx, p, svc)
+		out, err := run(ctx, p, register)
 		if err != nil {
 			fmt.Fprintln(p.Out, autherrors.Message(err))
 			return err
@@ -25,7 +26,7 @@ func New(svc *services.Service) cli.Command {
 	}
 }
 
-func run(ctx context.Context, p *cli.Prompter, svc *services.Service) (dto.Output, error) {
+func run(ctx context.Context, p *cli.Prompter, register RegisterFunc) (dto.Output, error) {
 	email, err := p.Line("email: ")
 	if err != nil {
 		return dto.Output{}, err
@@ -41,5 +42,5 @@ func run(ctx context.Context, p *cli.Prompter, svc *services.Service) (dto.Outpu
 		keys.Zero(confirm)
 		return dto.Output{}, err
 	}
-	return svc.Register(ctx, dto.Input{Email: email, Password: pw, Confirm: confirm})
+	return register(ctx, dto.Input{Email: email, Password: pw, Confirm: confirm})
 }

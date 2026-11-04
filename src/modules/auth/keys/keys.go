@@ -39,6 +39,22 @@ func Split(master []byte) (auth, enc []byte, err error) {
 	return auth, enc, nil
 }
 
+func Wrap(secret, salt []byte, p Params, vaultKey, aad []byte) (blob, authHash []byte, err error) {
+	master := Derive(secret, salt, p)
+	defer Zero(master)
+	authHash, encKey, err := Split(master)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer Zero(encKey)
+	blob, err = Seal(encKey, vaultKey, aad)
+	if err != nil {
+		Zero(authHash)
+		return nil, nil, err
+	}
+	return blob, authHash, nil
+}
+
 func Random(n int) ([]byte, error) {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {

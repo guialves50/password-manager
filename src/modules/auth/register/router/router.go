@@ -10,6 +10,6 @@ import (
 )
 
 func Routes(db *gorm.DB) map[string]cli.Command {
-	svc := &services.Service{Repo: repository.New(db), Params: keys.DefaultParams}
-	return map[string]cli.Command{"register": controllers.New(svc)}
+	svc := &services.DBService{Repo: repository.New(db), Params: keys.DefaultParams}
+	return map[string]cli.Command{"register": controllers.New(svc.Register)}
 }

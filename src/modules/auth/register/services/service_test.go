@@ -3,6 +3,9 @@ package services
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strings"
@@ -10,21 +13,25 @@ import (
 
 	autherrors "github.com/guialves50/password-manager/src/modules/auth/errors"
 	"github.com/guialves50/password-manager/src/modules/auth/keys"
+	prelogin "github.com/guialves50/password-manager/src/modules/auth/prelogin/dto"
 	"github.com/guialves50/password-manager/src/modules/auth/register/dto"
-	"github.com/guialves50/password-manager/src/modules/user"
 )
 
 var testParams = keys.Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}
 
-type fakeRepo struct {
-	got   *user.User
+type fakeAPI struct {
+	got   dto.Request
+	raw   []byte
 	calls int
 	err   error
 }
 
-func (f *fakeRepo) Create(_ context.Context, u *user.User) error {
+func (f *fakeAPI) Register(_ context.Context, req dto.Request) error {
 	f.calls++
-	f.got = u
+	f.raw, _ = json.Marshal(req)
+	f.got = req
+	f.got.AuthHash = bytes.Clone(req.AuthHash)
+	f.got.RecoveryAuthHash = bytes.Clone(req.RecoveryAuthHash)
 	return f.err
 }
 
@@ -32,9 +39,20 @@ func input(email, pw, confirm string) dto.Input {
 	return dto.Input{Email: email, Password: []byte(pw), Confirm: []byte(confirm)}
 }
 
-func TestRegisterHappyPath(t *testing.T) {
-	repo := &fakeRepo{}
-	svc := &Service{Repo: repo, Params: testParams}
+func assertNoSecrets(t *testing.T, payload []byte, secrets map[string][]byte) {
+	t.Helper()
+	for name, s := range secrets {
+		for _, form := range []string{string(s), hex.EncodeToString(s), base64.StdEncoding.EncodeToString(s), base64.RawStdEncoding.EncodeToString(s), base64.RawURLEncoding.EncodeToString(s)} {
+			if strings.Contains(string(payload), form) {
+				t.Fatalf("request contains the %s: %s", name, payload)
+			}
+		}
+	}
+}
+
+func TestRegisterSendsOnlyDerivedMaterial(t *testing.T) {
+	api := &fakeAPI{}
+	svc := &Service{API: api, Params: testParams}
 	in := input("  Alice@Example.COM ", "SenhaForte1", "SenhaForte1")
 
 	out, err := svc.Register(context.Background(), in)
@@ -44,63 +62,65 @@ func TestRegisterHappyPath(t *testing.T) {
 	if !regexp.MustCompile(`^[A-Z2-7]{4}(-[A-Z2-7]{4}){7}$`).MatchString(out.RecoveryKey) {
 		t.Fatalf("recovery key %q", out.RecoveryKey)
 	}
-	u := repo.got
-	if repo.calls != 1 || u == nil {
-		t.Fatalf("create calls %d", repo.calls)
+	r := api.got
+	if api.calls != 1 || r.Email != "alice@example.com" {
+		t.Fatalf("calls %d email %q", api.calls, r.Email)
 	}
-	if u.Email != "alice@example.com" {
-		t.Fatalf("email %q", u.Email)
+	if r.KDF != (prelogin.KDF{Time: testParams.Time, MemoryKiB: testParams.MemoryKiB, Threads: testParams.Threads}) {
+		t.Fatalf("kdf %+v", r.KDF)
 	}
-	if u.KDFTime != testParams.Time || u.KDFMemoryKiB != testParams.MemoryKiB || u.KDFThreads != testParams.Threads {
-		t.Fatalf("params %d %d %d", u.KDFTime, u.KDFMemoryKiB, u.KDFThreads)
+	if len(r.MasterSalt) != 16 || len(r.RecoverySalt) != 16 || bytes.Equal(r.MasterSalt, r.RecoverySalt) {
+		t.Fatalf("salts %x %x", r.MasterSalt, r.RecoverySalt)
 	}
-	if len(u.MasterSalt) != 16 || len(u.RecoverySalt) != 16 || bytes.Equal(u.MasterSalt, u.RecoverySalt) {
-		t.Fatalf("salts %x %x", u.MasterSalt, u.RecoverySalt)
+	if len(r.MasterBlob) != 60 || len(r.RecoveryBlob) != 60 || len(r.AuthHash) != 32 || len(r.RecoveryAuthHash) != 32 {
+		t.Fatalf("lens %d %d %d %d", len(r.MasterBlob), len(r.RecoveryBlob), len(r.AuthHash), len(r.RecoveryAuthHash))
 	}
 
-	masterKEK := keys.Derive([]byte("SenhaForte1"), u.MasterSalt, testParams)
-	v1, err := keys.Open(masterKEK, u.MasterWrappedKey, []byte("pm/master/v1|alice@example.com"))
-	if err != nil {
-		t.Fatalf("open master: %v", err)
+	master := keys.Derive([]byte("SenhaForte1"), r.MasterSalt, testParams)
+	auth, enc, _ := keys.Split(master)
+	if !bytes.Equal(auth, r.AuthHash) {
+		t.Fatal("auth hash is not HKDF(master, pm/auth/v1)")
 	}
-	recKEK := keys.Derive(keys.NormalizeRecoveryKey([]byte(out.RecoveryKey)), u.RecoverySalt, testParams)
-	v2, err := keys.Open(recKEK, u.RecoveryWrappedKey, []byte("pm/recovery/v1|alice@example.com"))
+	v1, err := keys.Open(enc, r.MasterBlob, []byte("pm/master/v1|alice@example.com"))
 	if err != nil {
-		t.Fatalf("open recovery: %v", err)
+		t.Fatalf("open master blob with encKey: %v", err)
+	}
+	recSecret := keys.NormalizeRecoveryKey([]byte(out.RecoveryKey))
+	recMaster := keys.Derive(recSecret, r.RecoverySalt, testParams)
+	recAuth, recEnc, _ := keys.Split(recMaster)
+	if !bytes.Equal(recAuth, r.RecoveryAuthHash) {
+		t.Fatal("recovery auth hash mismatch")
+	}
+	v2, err := keys.Open(recEnc, r.RecoveryBlob, []byte("pm/recovery/v1|alice@example.com"))
+	if err != nil {
+		t.Fatalf("open recovery blob: %v", err)
 	}
 	if len(v1) != 32 || !bytes.Equal(v1, v2) || bytes.Equal(v1, make([]byte, 32)) {
-		t.Fatalf("vault keys differ or invalid: %x %x", v1, v2)
-	}
-	if _, err := keys.Open(masterKEK, u.MasterWrappedKey, []byte("pm/master/v1|bob@example.com")); err == nil {
-		t.Fatal("blob opened with another email as AAD")
+		t.Fatalf("vault keys %x %x", v1, v2)
 	}
 
-	secrets := [][]byte{[]byte("SenhaForte1"), []byte(out.RecoveryKey), keys.NormalizeRecoveryKey([]byte(out.RecoveryKey)), v1}
-	for _, field := range [][]byte{[]byte(u.Email), u.MasterSalt, u.MasterWrappedKey, u.RecoverySalt, u.RecoveryWrappedKey} {
-		for _, s := range secrets {
-			if bytes.Contains(field, s) {
-				t.Fatalf("secret %q stored in clear", s)
-			}
-		}
-	}
+	assertNoSecrets(t, api.raw, map[string][]byte{
+		"master password": []byte("SenhaForte1"), "recovery key": []byte(out.RecoveryKey), "normalized recovery key": recSecret,
+		"vault key": v1, "master key": master, "encKey": enc, "recovery master key": recMaster, "recovery encKey": recEnc,
+	})
 	if !bytes.Equal(in.Password, make([]byte, len(in.Password))) || !bytes.Equal(in.Confirm, make([]byte, len(in.Confirm))) {
 		t.Fatal("input secrets not zeroed")
 	}
 }
 
-func TestRegisterUniqueKeysPerUser(t *testing.T) {
-	repo := &fakeRepo{}
-	svc := &Service{Repo: repo, Params: testParams}
+func TestRegisterUniqueMaterialPerUser(t *testing.T) {
+	api := &fakeAPI{}
+	svc := &Service{API: api, Params: testParams}
 	out1, _ := svc.Register(context.Background(), input("a@example.com", "SenhaForte1", "SenhaForte1"))
-	u1 := repo.got
+	r1 := api.got
 	out2, _ := svc.Register(context.Background(), input("b@example.com", "SenhaForte1", "SenhaForte1"))
-	u2 := repo.got
-	if out1.RecoveryKey == out2.RecoveryKey || bytes.Equal(u1.MasterSalt, u2.MasterSalt) {
+	r2 := api.got
+	if out1.RecoveryKey == out2.RecoveryKey || bytes.Equal(r1.MasterSalt, r2.MasterSalt) || bytes.Equal(r1.AuthHash, r2.AuthHash) {
 		t.Fatal("random material repeated across users")
 	}
 }
 
-func TestRegisterValidationNeverCallsRepo(t *testing.T) {
+func TestRegisterValidationNeverCallsServer(t *testing.T) {
 	cases := []struct {
 		name string
 		in   dto.Input
@@ -116,23 +136,20 @@ func TestRegisterValidationNeverCallsRepo(t *testing.T) {
 		{"mismatch", input("a@example.com", "SenhaForte1", "SenhaForte2"), autherrors.ErrPasswordMismatch},
 	}
 	for _, c := range cases {
-		repo := &fakeRepo{}
-		svc := &Service{Repo: repo, Params: testParams}
-		_, err := svc.Register(context.Background(), c.in)
-		if err != c.want {
-			t.Errorf("%s: got %v, want %v", c.name, err, c.want)
-		}
-		if repo.calls != 0 {
-			t.Errorf("%s: repo called", c.name)
+		api := &fakeAPI{}
+		_, err := (&Service{API: api, Params: testParams}).Register(context.Background(), c.in)
+		if err != c.want || api.calls != 0 {
+			t.Errorf("%s: got %v, calls %d", c.name, err, api.calls)
 		}
 	}
 }
 
-func TestRegisterEmailTaken(t *testing.T) {
-	repo := &fakeRepo{err: autherrors.ErrEmailTaken}
-	svc := &Service{Repo: repo, Params: testParams}
-	out, err := svc.Register(context.Background(), input("a@example.com", "SenhaForte1", "SenhaForte1"))
-	if !errors.Is(err, autherrors.ErrEmailTaken) || out.RecoveryKey != "" {
-		t.Fatalf("got %q, %v", out.RecoveryKey, err)
+func TestRegisterServerErrors(t *testing.T) {
+	for _, want := range []error{autherrors.ErrEmailTaken, autherrors.ErrUnreachable, errors.New("api: status 500")} {
+		api := &fakeAPI{err: want}
+		out, err := (&Service{API: api, Params: testParams}).Register(context.Background(), input("a@example.com", "SenhaForte1", "SenhaForte1"))
+		if !errors.Is(err, want) || out.RecoveryKey != "" {
+			t.Errorf("%v: got %q, %v", want, out.RecoveryKey, err)
+		}
 	}
 }

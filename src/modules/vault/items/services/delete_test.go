@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/guialves50/password-manager/src/cli"
 	vaulterrors "github.com/guialves50/password-manager/src/modules/vault/errors"
 )
 
@@ -15,8 +16,8 @@ type fakeDeleter struct {
 	ids     []string
 }
 
-func (f *fakeDeleter) Delete(_ context.Context, userID uint64, id string) (bool, error) {
-	f.userIDs = append(f.userIDs, userID)
+func (f *fakeDeleter) DeleteItem(_ context.Context, s *cli.Session, id string) (bool, error) {
+	f.userIDs = append(f.userIDs, s.UserID)
 	f.ids = append(f.ids, id)
 	return f.ok, f.err
 }

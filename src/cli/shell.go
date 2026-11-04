@@ -14,6 +14,7 @@ type Session struct {
 	UserID   uint64
 	Email    string
 	VaultKey []byte
+	Token    string
 }
 
 func (s *Session) Close() {

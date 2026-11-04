@@ -8,11 +8,10 @@ import (
 	"github.com/guialves50/password-manager/src/cli"
 	"github.com/guialves50/password-manager/src/modules/auth/keys"
 	"github.com/guialves50/password-manager/src/modules/vault/items/dto"
-	"github.com/guialves50/password-manager/src/modules/vault/items/repository"
 )
 
 type lister interface {
-	ListByUser(ctx context.Context, userID uint64) ([]repository.Item, error)
+	ListItems(ctx context.Context, s *cli.Session) ([]dto.StoredItem, error)
 }
 
 func aad(userID uint64, id string) []byte {
@@ -21,7 +20,7 @@ func aad(userID uint64, id string) []byte {
 
 // ponytail: one Open per item on every command; add an HMAC blind index on the name if vaults grow large
 func decryptAll(ctx context.Context, r lister, s *cli.Session) ([]dto.Item, int, error) {
-	rows, err := r.ListByUser(ctx, s.UserID)
+	rows, err := r.ListItems(ctx, s)
 	if err != nil {
 		return nil, 0, err
 	}

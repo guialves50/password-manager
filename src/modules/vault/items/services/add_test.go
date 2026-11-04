@@ -13,7 +13,6 @@ import (
 	"github.com/guialves50/password-manager/src/modules/auth/keys"
 	vaulterrors "github.com/guialves50/password-manager/src/modules/vault/errors"
 	"github.com/guialves50/password-manager/src/modules/vault/items/dto"
-	"github.com/guialves50/password-manager/src/modules/vault/items/repository"
 )
 
 func valid() dto.Item {
@@ -33,8 +32,8 @@ func TestAddSealsItemWithVaultKey(t *testing.T) {
 		t.Fatalf("created %d", len(repo.created))
 	}
 	got := repo.created[0]
-	if !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(got.ID) || got.UserID != 42 {
-		t.Fatalf("row id %q user %d", got.ID, got.UserID)
+	if !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(got.ID) || repo.createdFor[0] != 42 {
+		t.Fatalf("row id %q user %d", got.ID, repo.createdFor[0])
 	}
 	plain, err := keys.Open(s.VaultKey, got.Blob, []byte("pm/item/v1|42|"+got.ID))
 	if err != nil {
@@ -204,7 +203,7 @@ func TestAddReportsSkippedItems(t *testing.T) {
 	s := session(t)
 	tampered := row(t, s, "id-1", dto.Item{Name: "bad", Password: "p"})
 	tampered.Blob[0] ^= 1
-	repo := &fakeRepo{rows: []repository.Item{tampered}}
+	repo := &fakeRepo{rows: []dto.StoredItem{tampered}}
 
 	skipped, err := (&AddService{Repo: repo}).Add(context.Background(), s, valid())
 	if err != nil || skipped != 1 || len(repo.created) != 1 {

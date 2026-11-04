@@ -8,14 +8,13 @@ import (
 	"testing"
 
 	"github.com/guialves50/password-manager/src/modules/vault/items/dto"
-	"github.com/guialves50/password-manager/src/modules/vault/items/repository"
 )
 
 func TestListSortsNamesIgnoringCase(t *testing.T) {
 	s := session(t)
 	tampered := row(t, s, "id-4", dto.Item{Name: "bad", Password: "p"})
 	tampered.Blob[0] ^= 1
-	repo := &fakeRepo{rows: []repository.Item{
+	repo := &fakeRepo{rows: []dto.StoredItem{
 		row(t, s, "id-1", dto.Item{Name: "github", Password: "p"}),
 		row(t, s, "id-2", dto.Item{Name: "Zoom", Password: "p"}),
 		row(t, s, "id-3", dto.Item{Name: "Amazon", Password: "p"}),
@@ -53,7 +52,7 @@ func TestListPropagatesRepoError(t *testing.T) {
 
 func TestListOrdersByLowercaseBytes(t *testing.T) {
 	s := session(t)
-	var rows []repository.Item
+	var rows []dto.StoredItem
 	for i, name := range []string{"zoom", "Ábaco", "ab", "a_b", "Amazon"} {
 		rows = append(rows, row(t, s, fmt.Sprintf("id-%d", i), dto.Item{Name: name, Password: "p"}))
 	}

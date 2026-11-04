@@ -11,12 +11,11 @@ import (
 	"github.com/guialves50/password-manager/src/modules/auth/keys"
 	vaulterrors "github.com/guialves50/password-manager/src/modules/vault/errors"
 	"github.com/guialves50/password-manager/src/modules/vault/items/dto"
-	"github.com/guialves50/password-manager/src/modules/vault/items/repository"
 )
 
 type addRepo interface {
 	lister
-	Create(ctx context.Context, it *repository.Item) error
+	CreateItem(ctx context.Context, s *cli.Session, id string, blob []byte) error
 }
 
 type AddService struct {
@@ -68,5 +67,5 @@ func (a *AddService) Add(ctx context.Context, s *cli.Session, in dto.Item) (int,
 	if err != nil {
 		return skipped, err
 	}
-	return skipped, a.Repo.Create(ctx, &repository.Item{ID: id, UserID: s.UserID, Blob: blob})
+	return skipped, a.Repo.CreateItem(ctx, s, id, blob)
 }

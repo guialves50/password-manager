@@ -12,7 +12,9 @@ import (
 
 type LoginFunc func(ctx context.Context, in dto.Input) (*cli.Session, error)
 
-func New(login LoginFunc, cmds map[string]cli.SessionCommand) cli.Command {
+type LogoutFunc func(ctx context.Context, token string) error
+
+func New(login LoginFunc, logout LogoutFunc, cmds map[string]cli.SessionCommand) cli.Command {
 	return func(ctx context.Context, p *cli.Prompter) error {
 		s, err := run(ctx, p, login)
 		if err != nil {
@@ -20,6 +22,7 @@ func New(login LoginFunc, cmds map[string]cli.SessionCommand) cli.Command {
 			return err
 		}
 		cli.Shell(ctx, p, s, cmds)
+		logout(ctx, s.Token)
 		return nil
 	}
 }

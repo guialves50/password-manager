@@ -9,6 +9,8 @@ import (
 	"io"
 	"strings"
 	"testing"
+
+	autherrors "github.com/guialves50/password-manager/src/modules/auth/errors"
 )
 
 func newSession() *Session {
@@ -139,4 +141,21 @@ func TestShellCommandErrorContinues(t *testing.T) {
 		t.Fatalf("out %q listed %d", out, listed)
 	}
 	assertZeroed(t, s)
+}
+
+func TestShellSessionExpiredStopsAndZeroesKey(t *testing.T) {
+	for _, ret := range []error{autherrors.ErrSessionExpired, fmt.Errorf("list: %w", autherrors.ErrSessionExpired)} {
+		s := newSession()
+		listed := 0
+		cmds := map[string]SessionCommand{"list": func(_ context.Context, p *Prompter, _ *Session, _ string) error {
+			listed++
+			fmt.Fprintln(p.Out, autherrors.Message(ret))
+			return ret
+		}}
+		out := runCmds("list\nlist\nexit\n", s, cmds)
+		if out != "pm> sessão expirada, faça login novamente\n" || listed != 1 {
+			t.Errorf("%v: out %q listed %d", ret, out, listed)
+		}
+		assertZeroed(t, s)
+	}
 }

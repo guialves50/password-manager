@@ -33,8 +33,18 @@ func prompter(lines string, secrets ...string) (*cli.Prompter, *bytes.Buffer) {
 	}, &out
 }
 
+type logoutSpy struct {
+	tokens []string
+}
+
+func (l *logoutSpy) logout(_ context.Context, token string) error {
+	l.tokens = append(l.tokens, token)
+	return errors.New("ignored")
+}
+
 func TestLoginOpensShellAndZeroesKeyOnExit(t *testing.T) {
-	s := &cli.Session{UserID: 1, Email: "alice@example.com", VaultKey: bytes.Repeat([]byte{9}, 32)}
+	s := &cli.Session{UserID: 1, Email: "alice@example.com", VaultKey: bytes.Repeat([]byte{9}, 32), Token: "tok"}
+	spy := &logoutSpy{}
 	var got dto.Input
 	login := func(_ context.Context, in dto.Input) (*cli.Session, error) {
 		got = dto.Input{Email: in.Email, Password: bytes.Clone(in.Password)}
@@ -42,8 +52,11 @@ func TestLoginOpensShellAndZeroesKeyOnExit(t *testing.T) {
 	}
 	p, out := prompter("alice@example.com\nfoo\nexit\nnot-read\n", "SenhaForte1")
 
-	if err := New(login, nil)(context.Background(), p); err != nil {
+	if err := New(login, spy.logout, nil)(context.Background(), p); err != nil {
 		t.Fatal(err)
+	}
+	if len(spy.tokens) != 1 || spy.tokens[0] != "tok" {
+		t.Fatalf("logout tokens %q", spy.tokens)
 	}
 	if got.Email != "alice@example.com" || string(got.Password) != "SenhaForte1" {
 		t.Fatalf("input %q %q", got.Email, got.Password)
@@ -77,7 +90,7 @@ func TestLoginForwardsCommandsToShell(t *testing.T) {
 	}}
 	p, out := prompter("alice@example.com\nget conta banco\nexit\n", "SenhaForte1")
 
-	if err := New(login, cmds)(context.Background(), p); err != nil {
+	if err := New(login, (&logoutSpy{}).logout, cmds)(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}
 	if len(args) != 1 || args[0] != "conta banco" {
@@ -112,7 +125,8 @@ func TestLoginErrors(t *testing.T) {
 			return nil, c.err
 		}
 		p, out := prompter(c.lines, c.secrets...)
-		err := New(login, nil)(context.Background(), p)
+		spy := &logoutSpy{}
+		err := New(login, spy.logout, nil)(context.Background(), p)
 		o := out.String()
 		if err == nil || !strings.HasSuffix(o, c.want) {
 			t.Errorf("%s: err %v out %q", c.name, err, o)
@@ -120,8 +134,44 @@ func TestLoginErrors(t *testing.T) {
 		if strings.Contains(o, "pm> ") || strings.Contains(o, "SenhaErrada1") {
 			t.Errorf("%s: unexpected output %q", c.name, o)
 		}
+		if len(spy.tokens) != 0 {
+			t.Errorf("%s: logout called %q", c.name, spy.tokens)
+		}
 		if c.err == nil && calls != 0 {
 			t.Errorf("%s: login called after EOF", c.name)
+		}
+	}
+}
+
+func TestLoginLogsOutWhenShellEnds(t *testing.T) {
+	expired := map[string]cli.SessionCommand{"list": func(_ context.Context, p *cli.Prompter, _ *cli.Session, _ string) error {
+		fmt.Fprintln(p.Out, autherrors.Message(autherrors.ErrSessionExpired))
+		return autherrors.ErrSessionExpired
+	}}
+	cases := []struct {
+		name, lines, wantSuffix string
+		cmds                    map[string]cli.SessionCommand
+	}{
+		{"logout", "alice@example.com\nlogout\nnot-read\n", "pm> ", nil},
+		{"eof", "alice@example.com\n", "pm> \n", nil},
+		{"expired", "alice@example.com\nlist\nlist\n", "pm> sessão expirada, faça login novamente\n", expired},
+	}
+	for _, c := range cases {
+		s := &cli.Session{UserID: 1, Email: "alice@example.com", VaultKey: bytes.Repeat([]byte{9}, 32), Token: "tok-" + c.name}
+		spy := &logoutSpy{}
+		login := func(context.Context, dto.Input) (*cli.Session, error) { return s, nil }
+		p, out := prompter(c.lines, "SenhaForte1")
+		if err := New(login, spy.logout, c.cmds)(context.Background(), p); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if !strings.HasSuffix(out.String(), c.wantSuffix) || strings.Count(out.String(), "sessão expirada") > 1 {
+			t.Errorf("%s: out %q", c.name, out.String())
+		}
+		if len(spy.tokens) != 1 || spy.tokens[0] != "tok-"+c.name {
+			t.Errorf("%s: logout tokens %q", c.name, spy.tokens)
+		}
+		if !bytes.Equal(s.VaultKey, make([]byte, 32)) {
+			t.Errorf("%s: key not zeroed", c.name)
 		}
 	}
 }

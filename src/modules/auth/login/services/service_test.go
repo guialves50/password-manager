@@ -3,190 +3,149 @@ package services
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
-	"time"
 
 	autherrors "github.com/guialves50/password-manager/src/modules/auth/errors"
 	"github.com/guialves50/password-manager/src/modules/auth/keys"
 	"github.com/guialves50/password-manager/src/modules/auth/login/dto"
-	"github.com/guialves50/password-manager/src/modules/user"
+	prelogin "github.com/guialves50/password-manager/src/modules/auth/prelogin/dto"
 )
 
 var testParams = keys.Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}
 
-type fakeRepo struct {
-	u        *user.User
-	findErr  error
-	queried  string
-	failures []uint64
-	resets   []uint64
+type fakeAPI struct {
+	salt, blob, authHash []byte
+	preErr, loginErr     error
+	prelogins            []string
+	logins               []dto.Request
+	raw                  [][]byte
 }
 
-func (f *fakeRepo) FindByEmail(_ context.Context, email string) (*user.User, error) {
-	f.queried = email
-	if f.u == nil || f.u.Email != email {
-		return nil, f.findErr
+func (f *fakeAPI) Prelogin(_ context.Context, email string) (prelogin.Response, error) {
+	f.prelogins = append(f.prelogins, email)
+	raw, _ := json.Marshal(prelogin.Request{Email: email})
+	f.raw = append(f.raw, raw)
+	kdf := prelogin.KDF{Time: testParams.Time, MemoryKiB: testParams.MemoryKiB, Threads: testParams.Threads}
+	return prelogin.Response{KDF: kdf, MasterSalt: f.salt, RecoverySalt: bytes.Repeat([]byte{7}, 16)}, f.preErr
+}
+
+func (f *fakeAPI) Login(_ context.Context, req dto.Request) (dto.Response, error) {
+	raw, _ := json.Marshal(req)
+	f.raw = append(f.raw, raw)
+	req.AuthHash = bytes.Clone(req.AuthHash)
+	f.logins = append(f.logins, req)
+	if f.loginErr != nil {
+		return dto.Response{}, f.loginErr
 	}
-	return f.u, f.findErr
+	if !bytes.Equal(req.AuthHash, f.authHash) {
+		return dto.Response{}, autherrors.ErrInvalidCredentials
+	}
+	return dto.Response{Token: "tok", UserID: 42, MasterBlob: f.blob}, nil
 }
 
-func (f *fakeRepo) RecordFailure(_ context.Context, id uint64) error {
-	f.failures = append(f.failures, id)
-	return nil
-}
-
-func (f *fakeRepo) ResetFailures(_ context.Context, id uint64) error {
-	f.resets = append(f.resets, id)
-	return nil
-}
-
-type deriveSpy struct {
-	calls  int
-	params []keys.Params
-}
-
-func (d *deriveSpy) derive(secret, salt []byte, p keys.Params) []byte {
-	d.calls++
-	d.params = append(d.params, p)
-	return keys.Derive(secret, salt, p)
-}
-
-func seedUser(t *testing.T, email, pw string) (*user.User, []byte) {
+func seed(t *testing.T, email, pw string) (*fakeAPI, []byte, [][]byte) {
 	t.Helper()
 	vk, _ := keys.Random(32)
 	salt, _ := keys.Random(16)
-	blob, err := keys.Seal(keys.Derive([]byte(pw), salt, testParams), vk, []byte("pm/master/v1|"+email))
+	blob, auth, err := keys.Wrap([]byte(pw), salt, testParams, vk, []byte("pm/master/v1|"+email))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &user.User{
-		ID: 42, Email: email,
-		KDFTime: testParams.Time, KDFMemoryKiB: testParams.MemoryKiB, KDFThreads: testParams.Threads,
-		MasterSalt: salt, MasterWrappedKey: blob,
-	}, vk
+	master := keys.Derive([]byte(pw), salt, testParams)
+	_, enc, _ := keys.Split(master)
+	return &fakeAPI{salt: salt, blob: blob, authHash: auth}, vk, [][]byte{master, enc}
 }
 
-func newService(repo *fakeRepo) (*Service, *deriveSpy) {
-	spy := &deriveSpy{}
-	return &Service{Repo: repo, Params: testParams, Derive: spy.derive}, spy
+func assertNoSecrets(t *testing.T, payloads [][]byte, secrets map[string][]byte) {
+	t.Helper()
+	for _, payload := range payloads {
+		for name, s := range secrets {
+			for _, form := range []string{string(s), hex.EncodeToString(s), base64.StdEncoding.EncodeToString(s), base64.RawStdEncoding.EncodeToString(s), base64.RawURLEncoding.EncodeToString(s)} {
+				if strings.Contains(string(payload), form) {
+					t.Fatalf("request contains the %s: %s", name, payload)
+				}
+			}
+		}
+	}
 }
 
 func TestLoginSuccess(t *testing.T) {
-	u, vk := seedUser(t, "alice@example.com", "SenhaForte1")
-	u.FailedAttempts = 3
-	repo := &fakeRepo{u: u}
-	svc, spy := newService(repo)
+	api, vk, derived := seed(t, "alice@example.com", "SenhaForte1")
 	in := dto.Input{Email: " Alice@Example.com ", Password: []byte("SenhaForte1")}
 
-	s, err := svc.Login(context.Background(), in)
+	s, err := (&Service{API: api}).Login(context.Background(), in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.UserID != 42 || s.Email != "alice@example.com" || !bytes.Equal(s.VaultKey, vk) {
+	if s.UserID != 42 || s.Email != "alice@example.com" || s.Token != "tok" || !bytes.Equal(s.VaultKey, vk) {
 		t.Fatalf("session %+v", s)
 	}
-	if repo.queried != "alice@example.com" || len(repo.resets) != 1 || repo.resets[0] != 42 || len(repo.failures) != 0 {
-		t.Fatalf("queried %q resets %v failures %v", repo.queried, repo.resets, repo.failures)
+	if len(api.prelogins) != 1 || api.prelogins[0] != "alice@example.com" || len(api.logins) != 1 || api.logins[0].Email != "alice@example.com" {
+		t.Fatalf("prelogins %q logins %+v", api.prelogins, api.logins)
 	}
-	if spy.calls != 1 {
-		t.Fatalf("derive calls %d", spy.calls)
-	}
+	assertNoSecrets(t, api.raw, map[string][]byte{"master password": []byte("SenhaForte1"), "vault key": vk, "master key": derived[0], "encKey": derived[1]})
 	if !bytes.Equal(in.Password, make([]byte, len(in.Password))) {
 		t.Fatal("password not zeroed")
 	}
 }
 
-func TestLoginWrongPasswordRecordsFailure(t *testing.T) {
-	u, _ := seedUser(t, "alice@example.com", "SenhaForte1")
-	repo := &fakeRepo{u: u}
-	svc, spy := newService(repo)
-
-	s, err := svc.Login(context.Background(), dto.Input{Email: "alice@example.com", Password: []byte("SenhaErrada1")})
-	if s != nil || err != autherrors.ErrInvalidCredentials {
-		t.Fatalf("got %v, %v", s, err)
+func TestLoginWrongPassword(t *testing.T) {
+	api, _, _ := seed(t, "alice@example.com", "SenhaForte1")
+	s, err := (&Service{API: api}).Login(context.Background(), dto.Input{Email: "alice@example.com", Password: []byte("SenhaErrada1")})
+	if s != nil || !errors.Is(err, autherrors.ErrInvalidCredentials) || len(api.logins) != 1 {
+		t.Fatalf("got %v, %v, logins %d", s, err, len(api.logins))
 	}
-	if len(repo.failures) != 1 || repo.failures[0] != 42 || len(repo.resets) != 0 || spy.calls != 1 {
-		t.Fatalf("failures %v resets %v derive %d", repo.failures, repo.resets, spy.calls)
+	assertNoSecrets(t, api.raw, map[string][]byte{"master password": []byte("SenhaErrada1")})
+}
+
+func TestLoginInvalidEmailSendsNothing(t *testing.T) {
+	api, _, _ := seed(t, "alice@example.com", "SenhaForte1")
+	s, err := (&Service{API: api}).Login(context.Background(), dto.Input{Email: "not-an-email", Password: []byte("SenhaForte1")})
+	if s != nil || err != autherrors.ErrInvalidCredentials || len(api.raw) != 0 {
+		t.Fatalf("got %v, %v, requests %d", s, err, len(api.raw))
+	}
+}
+
+func TestLoginServerErrorsPropagate(t *testing.T) {
+	locked := &autherrors.LockedError{Minutes: 15}
+	cases := []struct {
+		name             string
+		preErr, loginErr error
+		logins           int
+	}{
+		{"prelogin unreachable", autherrors.ErrUnreachable, nil, 0},
+		{"locked", nil, locked, 1},
+		{"unknown email", nil, autherrors.ErrInvalidCredentials, 1},
+		{"internal", nil, errors.New("api: status 500"), 1},
+	}
+	for _, c := range cases {
+		api, _, _ := seed(t, "alice@example.com", "SenhaForte1")
+		api.preErr, api.loginErr = c.preErr, c.loginErr
+		want := c.preErr
+		if want == nil {
+			want = c.loginErr
+		}
+		s, err := (&Service{API: api}).Login(context.Background(), dto.Input{Email: "alice@example.com", Password: []byte("SenhaForte1")})
+		if s != nil || !errors.Is(err, want) || len(api.logins) != c.logins {
+			t.Errorf("%s: got %v, %v, logins %d", c.name, s, err, len(api.logins))
+		}
 	}
 }
 
 func TestLoginBlobBoundToEmail(t *testing.T) {
-	u, _ := seedUser(t, "alice@example.com", "SenhaForte1")
-	u.Email = "bob@example.com"
-	repo := &fakeRepo{u: u}
-	svc, _ := newService(repo)
-
-	_, err := svc.Login(context.Background(), dto.Input{Email: "bob@example.com", Password: []byte("SenhaForte1")})
-	if err != autherrors.ErrInvalidCredentials || len(repo.failures) != 1 {
-		t.Fatalf("err %v failures %v", err, repo.failures)
-	}
-}
-
-func TestLoginUnknownEmailRunsDummyDerive(t *testing.T) {
-	for _, email := range []string{"ghost@example.com", "not-an-email"} {
-		repo := &fakeRepo{}
-		svc, spy := newService(repo)
-		s, err := svc.Login(context.Background(), dto.Input{Email: email, Password: []byte("SenhaForte1")})
-		if s != nil || err != autherrors.ErrInvalidCredentials {
-			t.Fatalf("%s: got %v, %v", email, s, err)
-		}
-		if spy.calls != 1 || spy.params[0] != testParams {
-			t.Fatalf("%s: derive calls %d params %v", email, spy.calls, spy.params)
-		}
-		if len(repo.failures) != 0 || len(repo.resets) != 0 {
-			t.Fatalf("%s: failures %v resets %v", email, repo.failures, repo.resets)
-		}
-	}
-}
-
-func TestLoginLockedSkipsDerive(t *testing.T) {
-	cases := []struct {
-		remaining time.Duration
-		want      int
-	}{
-		{14*time.Minute + 30*time.Second, 15},
-		{61 * time.Second, 2},
-		{10 * time.Second, 1},
-	}
-	for _, c := range cases {
-		u, _ := seedUser(t, "alice@example.com", "SenhaForte1")
-		until := time.Now().Add(c.remaining)
-		u.LockedUntil = &until
-		repo := &fakeRepo{u: u}
-		svc, spy := newService(repo)
-
-		s, err := svc.Login(context.Background(), dto.Input{Email: "alice@example.com", Password: []byte("SenhaForte1")})
-		var locked *autherrors.LockedError
-		if s != nil || !errors.As(err, &locked) || locked.Minutes != c.want {
-			t.Fatalf("%v: got %v, %v", c.remaining, s, err)
-		}
-		if spy.calls != 0 || len(repo.failures) != 0 || len(repo.resets) != 0 {
-			t.Fatalf("%v: derive %d failures %v resets %v", c.remaining, spy.calls, repo.failures, repo.resets)
-		}
-	}
-}
-
-func TestLoginExpiredLockAllowsLogin(t *testing.T) {
-	u, _ := seedUser(t, "alice@example.com", "SenhaForte1")
-	past := time.Now().Add(-time.Minute)
-	u.LockedUntil = &past
-	u.FailedAttempts = 5
-	repo := &fakeRepo{u: u}
-	svc, _ := newService(repo)
-
-	if _, err := svc.Login(context.Background(), dto.Input{Email: "alice@example.com", Password: []byte("SenhaForte1")}); err != nil {
-		t.Fatal(err)
-	}
-	if len(repo.resets) != 1 {
-		t.Fatalf("resets %v", repo.resets)
-	}
-}
-
-func TestLoginRepoErrorPropagates(t *testing.T) {
-	boom := errors.New("db down")
-	svc, _ := newService(&fakeRepo{findErr: boom})
-	if _, err := svc.Login(context.Background(), dto.Input{Email: "alice@example.com", Password: []byte("SenhaForte1")}); !errors.Is(err, boom) {
-		t.Fatalf("got %v", err)
+	api, _, _ := seed(t, "bob@example.com", "SenhaForte1")
+	api.blob = func() []byte {
+		vk, _ := keys.Random(32)
+		blob, _, _ := keys.Wrap([]byte("SenhaForte1"), api.salt, testParams, vk, []byte("pm/master/v1|alice@example.com"))
+		return blob
+	}()
+	s, err := (&Service{API: api}).Login(context.Background(), dto.Input{Email: "bob@example.com", Password: []byte("SenhaForte1")})
+	if s != nil || err == nil || autherrors.Message(err) != "erro interno" {
+		t.Fatalf("got %v, %v", s, err)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	autherrors "github.com/guialves50/password-manager/src/modules/auth/errors"
 	"github.com/guialves50/password-manager/src/modules/auth/keys"
 )
 
@@ -34,7 +35,7 @@ func Shell(ctx context.Context, p *Prompter, s *Session, cmds map[string]Session
 		case line == "exit" || line == "logout":
 			return
 		case cmds[name] != nil:
-			if errors.Is(cmds[name](ctx, p, s, strings.TrimSpace(arg)), io.EOF) {
+			if err := cmds[name](ctx, p, s, strings.TrimSpace(arg)); errors.Is(err, io.EOF) || errors.Is(err, autherrors.ErrSessionExpired) {
 				return
 			}
 		case line != "":

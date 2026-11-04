@@ -101,3 +101,20 @@ func TestRecoveryKey(t *testing.T) {
 		}
 	}
 }
+
+func TestSealNoncesUnique(t *testing.T) {
+	key, _ := Random(32)
+	vault, _ := Random(32)
+	aad := []byte("pm/master/v1|a@b.com")
+	a, err := Seal(key, vault, aad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := Seal(key, vault, aad)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(a[:12], b[:12]) || bytes.Equal(a, b) {
+		t.Fatal("nonce reused")
+	}
+}

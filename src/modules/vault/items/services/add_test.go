@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"regexp"
@@ -148,5 +149,25 @@ func TestAddRepoErrors(t *testing.T) {
 	repo = &fakeRepo{createErr: boom}
 	if err := (&AddService{Repo: repo}).Add(context.Background(), session(t), valid()); !errors.Is(err, boom) {
 		t.Fatalf("create error: %v", err)
+	}
+}
+
+func TestAddIDIsIndependentOfName(t *testing.T) {
+	s := session(t)
+	var ids []string
+	for range 2 {
+		repo := &fakeRepo{}
+		if err := (&AddService{Repo: repo}).Add(context.Background(), s, valid()); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, repo.created[0].ID)
+	}
+	if ids[0] == ids[1] {
+		t.Fatalf("same name produced the same id %q", ids[0])
+	}
+	for _, id := range ids {
+		if strings.Contains(id, hex.EncodeToString([]byte(valid().Name))) {
+			t.Fatalf("id %q leaks the item name", id)
+		}
 	}
 }

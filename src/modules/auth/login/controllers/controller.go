@@ -12,14 +12,14 @@ import (
 
 type LoginFunc func(ctx context.Context, in dto.Input) (*cli.Session, error)
 
-func New(login LoginFunc) cli.Command {
+func New(login LoginFunc, cmds map[string]cli.SessionCommand) cli.Command {
 	return func(ctx context.Context, p *cli.Prompter) error {
 		s, err := run(ctx, p, login)
 		if err != nil {
 			fmt.Fprintln(p.Out, autherrors.Message(err))
 			return err
 		}
-		cli.Shell(ctx, p, s, nil)
+		cli.Shell(ctx, p, s, cmds)
 		return nil
 	}
 }

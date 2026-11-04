@@ -12,6 +12,7 @@ import (
 	login "github.com/guialves50/password-manager/src/modules/auth/login/router"
 	recover "github.com/guialves50/password-manager/src/modules/auth/recover/router"
 	register "github.com/guialves50/password-manager/src/modules/auth/register/router"
+	items "github.com/guialves50/password-manager/src/modules/vault/items/router"
 	"gorm.io/gorm"
 )
 
@@ -33,7 +34,7 @@ func start(connect func() (*gorm.DB, error), args []string, p *cli.Prompter, std
 		return 1
 	}
 	routes := register.Routes(db)
-	maps.Copy(routes, login.Routes(db))
+	maps.Copy(routes, login.Routes(db, items.Routes(db)))
 	maps.Copy(routes, recover.Routes(db))
 	return run(args, routes, p, stderr)
 }

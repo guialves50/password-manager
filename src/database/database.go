@@ -1,10 +1,10 @@
 package database
 
 import (
-	"os"
-	"time"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"os"
+	"time"
 )
 
 func Connect() (*gorm.DB, error) {

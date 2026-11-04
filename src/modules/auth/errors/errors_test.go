@@ -1,6 +1,11 @@
 package errors
 
-import "testing"
+import (
+	"errors"
+	"fmt"
+	"io"
+	"testing"
+)
 
 func TestMessages(t *testing.T) {
 	cases := map[error]string{
@@ -17,6 +22,23 @@ func TestMessages(t *testing.T) {
 	for err, want := range cases {
 		if got := err.Error(); got != want {
 			t.Errorf("got %q, want %q", got, want)
+		}
+	}
+}
+
+func TestMessage(t *testing.T) {
+	cases := map[error]string{
+		io.EOF:                                  "operação cancelada",
+		fmt.Errorf("read: %w", io.EOF):          "operação cancelada",
+		ErrEmailTaken:                           "email já cadastrado",
+		ErrInvalidCredentials:                   "email ou senha mestra inválidos",
+		fmt.Errorf("x: %w", ErrInvalidRecovery): "email ou chave de recuperação inválidos",
+		&LockedError{Minutes: 3}:                "conta bloqueada, tente novamente em 3 minutos",
+		errors.New("pq: SenhaForte1"):           "erro interno",
+	}
+	for err, want := range cases {
+		if got := Message(err); got != want {
+			t.Errorf("%v: got %q, want %q", err, got, want)
 		}
 	}
 }

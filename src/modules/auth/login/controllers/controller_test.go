@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -41,7 +42,7 @@ func TestLoginOpensShellAndZeroesKeyOnExit(t *testing.T) {
 	}
 	p, out := prompter("alice@example.com\nfoo\nexit\nnot-read\n", "SenhaForte1")
 
-	if err := New(login)(context.Background(), p); err != nil {
+	if err := New(login, nil)(context.Background(), p); err != nil {
 		t.Fatal(err)
 	}
 	if got.Email != "alice@example.com" || string(got.Password) != "SenhaForte1" {
@@ -56,6 +57,34 @@ func TestLoginOpensShellAndZeroesKeyOnExit(t *testing.T) {
 		if strings.Contains(o, leak) {
 			t.Fatalf("vault key leaked in output %q", o)
 		}
+	}
+	if !bytes.Equal(s.VaultKey, make([]byte, 32)) {
+		t.Fatalf("key not zeroed: %v", s.VaultKey)
+	}
+}
+
+func TestLoginForwardsCommandsToShell(t *testing.T) {
+	s := &cli.Session{UserID: 1, Email: "alice@example.com", VaultKey: bytes.Repeat([]byte{9}, 32)}
+	login := func(context.Context, dto.Input) (*cli.Session, error) { return s, nil }
+	var args []string
+	cmds := map[string]cli.SessionCommand{"get": func(_ context.Context, p *cli.Prompter, cs *cli.Session, arg string) error {
+		if cs != s || !bytes.Equal(cs.VaultKey, bytes.Repeat([]byte{9}, 32)) {
+			t.Errorf("command session %+v", cs)
+		}
+		args = append(args, arg)
+		fmt.Fprintln(p.Out, "ok")
+		return nil
+	}}
+	p, out := prompter("alice@example.com\nget conta banco\nexit\n", "SenhaForte1")
+
+	if err := New(login, cmds)(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	if len(args) != 1 || args[0] != "conta banco" {
+		t.Fatalf("args %q", args)
+	}
+	if o := out.String(); !strings.HasSuffix(o, "pm> ok\npm> ") {
+		t.Fatalf("out %q", o)
 	}
 	if !bytes.Equal(s.VaultKey, make([]byte, 32)) {
 		t.Fatalf("key not zeroed: %v", s.VaultKey)
@@ -83,7 +112,7 @@ func TestLoginErrors(t *testing.T) {
 			return nil, c.err
 		}
 		p, out := prompter(c.lines, c.secrets...)
-		err := New(login)(context.Background(), p)
+		err := New(login, nil)(context.Background(), p)
 		o := out.String()
 		if err == nil || !strings.HasSuffix(o, c.want) {
 			t.Errorf("%s: err %v out %q", c.name, err, o)

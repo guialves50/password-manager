@@ -1,7 +1,8 @@
 package cli
 
 import (
-	"bufio"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -19,20 +20,27 @@ func (s *Session) Close() {
 	keys.Zero(s.VaultKey)
 }
 
-func Shell(in *bufio.Reader, out io.Writer, s *Session) {
+type SessionCommand func(ctx context.Context, p *Prompter, s *Session, arg string) error
+
+func Shell(ctx context.Context, p *Prompter, s *Session, cmds map[string]SessionCommand) {
 	defer s.Close()
 	for {
-		fmt.Fprint(out, "pm> ")
-		line, err := in.ReadString('\n')
-		cmd := strings.TrimSpace(line)
+		fmt.Fprint(p.Out, "pm> ")
+		line, err := p.In.ReadString('\n')
+		line = strings.TrimSpace(line)
+		name, arg, _ := strings.Cut(line, " ")
 		switch {
-		case cmd == "exit" || cmd == "logout":
+		case line == "exit" || line == "logout":
 			return
-		case cmd != "":
-			fmt.Fprintln(out, "comando desconhecido")
+		case cmds[name] != nil:
+			if errors.Is(cmds[name](ctx, p, s, strings.TrimSpace(arg)), io.EOF) {
+				return
+			}
+		case line != "":
+			fmt.Fprintln(p.Out, "comando desconhecido")
 		}
 		if err != nil {
-			fmt.Fprintln(out)
+			fmt.Fprintln(p.Out)
 			return
 		}
 	}

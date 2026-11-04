@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func Routes(db *gorm.DB) map[string]cli.Command {
+func Routes(db *gorm.DB, cmds map[string]cli.SessionCommand) map[string]cli.Command {
 	svc := &services.Service{Repo: user.NewRepository(db), Params: keys.DefaultParams, Derive: keys.Derive}
-	return map[string]cli.Command{"login": controllers.New(svc.Login)}
+	return map[string]cli.Command{"login": controllers.New(svc.Login, cmds)}
 }

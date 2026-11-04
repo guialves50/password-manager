@@ -19,6 +19,8 @@ func seed(t *testing.T, db *gorm.DB, email string) *user.User {
 		Email: email, KDFTime: 3, KDFMemoryKiB: 65536, KDFThreads: 4,
 		MasterSalt: []byte("s"), MasterWrappedKey: []byte("m"),
 		RecoverySalt: []byte("r"), RecoveryWrappedKey: []byte("k"),
+		AuthSalt: []byte("as"), AuthHash: []byte("ah"),
+		RecoveryAuthSalt: []byte("ras"), RecoveryAuthHash: []byte("rah"),
 	}
 	if err := db.Create(u).Error; err != nil {
 		t.Fatalf("seed: %v", err)
@@ -97,6 +99,8 @@ func TestEmailMustBeLowercase(t *testing.T) {
 		Email: "Upper@example.com", KDFTime: 3, KDFMemoryKiB: 65536, KDFThreads: 4,
 		MasterSalt: []byte("s"), MasterWrappedKey: []byte("m"),
 		RecoverySalt: []byte("r"), RecoveryWrappedKey: []byte("k"),
+		AuthSalt: []byte("as"), AuthHash: []byte("ah"),
+		RecoveryAuthSalt: []byte("ras"), RecoveryAuthHash: []byte("rah"),
 	}
 	if err := db.Create(u).Error; err == nil {
 		t.Fatal("uppercase email accepted")
@@ -154,5 +158,15 @@ func TestAuthHashColumnsRoundTrip(t *testing.T) {
 	if !bytes.Equal(got.AuthSalt, []byte("as")) || !bytes.Equal(got.AuthHash, []byte("ah")) ||
 		!bytes.Equal(got.RecoveryAuthSalt, []byte("ras")) || !bytes.Equal(got.RecoveryAuthHash, []byte("rah")) {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestAuthHashColumnsNotNull(t *testing.T) {
+	db := database.TestTx(t)
+	for _, col := range []string{"auth_salt", "auth_hash", "recovery_auth_salt", "recovery_auth_hash"} {
+		var nullable string
+		if err := db.Raw("SELECT is_nullable FROM information_schema.columns WHERE table_name = 'users' AND column_name = ?", col).Scan(&nullable).Error; err != nil || nullable != "NO" {
+			t.Errorf("%s nullable %q, %v", col, nullable, err)
+		}
 	}
 }

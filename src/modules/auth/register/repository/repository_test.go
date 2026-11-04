@@ -18,6 +18,8 @@ func newUser(email string) *user.User {
 		Email: email, KDFTime: 3, KDFMemoryKiB: 65536, KDFThreads: 4,
 		MasterSalt: []byte("s"), MasterWrappedKey: []byte("m"),
 		RecoverySalt: []byte("r"), RecoveryWrappedKey: []byte("k"),
+		AuthSalt: []byte("as"), AuthHash: []byte("ah"),
+		RecoveryAuthSalt: []byte("ras"), RecoveryAuthHash: []byte("rah"),
 	}
 }
 

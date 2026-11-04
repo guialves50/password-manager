@@ -20,5 +20,12 @@ func Connect() (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return db, db.AutoMigrate(&user.User{}, &repository.Item{}, &session.Session{})
+	if err := db.AutoMigrate(&user.User{}, &repository.Item{}, &session.Session{}); err != nil {
+		return nil, err
+	}
+	err = db.Exec("ALTER TABLE users ALTER COLUMN auth_salt SET NOT NULL, ALTER COLUMN auth_hash SET NOT NULL, ALTER COLUMN recovery_auth_salt SET NOT NULL, ALTER COLUMN recovery_auth_hash SET NOT NULL").Error
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
 }

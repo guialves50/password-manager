@@ -170,4 +170,31 @@ func TestAddIDIsIndependentOfName(t *testing.T) {
 			t.Fatalf("id %q leaks the item name", id)
 		}
 	}
+	a, _ := hex.DecodeString(ids[0])
+	b, _ := hex.DecodeString(ids[1])
+	same := 0
+	for i := range a {
+		if a[i] == b[i] {
+			same++
+		}
+	}
+	if same >= 4 {
+		t.Fatalf("ids %q and %q share %d of 16 bytes for the same name", ids[0], ids[1], same)
+	}
+}
+
+func TestAddTreatsInnerSpacesAsDistinctNames(t *testing.T) {
+	s := session(t)
+	repo := &fakeRepo{}
+	svc := &AddService{Repo: repo}
+	for _, name := range []string{"conta banco", "conta  banco"} {
+		in := valid()
+		in.Name = name
+		if err := svc.Add(context.Background(), s, in); err != nil {
+			t.Fatalf("%q: %v", name, err)
+		}
+	}
+	if len(repo.created) != 2 {
+		t.Fatalf("created %d", len(repo.created))
+	}
 }

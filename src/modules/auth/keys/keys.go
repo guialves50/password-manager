@@ -8,6 +8,7 @@ import (
 	"errors"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -80,9 +81,11 @@ func NewRecoveryKey() (string, error) {
 	return strings.Join(groups, "-"), nil
 }
 
-func NormalizeRecoveryKey(s string) []byte {
+func NormalizeRecoveryKey(b []byte) []byte {
 	out := make([]byte, 0, 32)
-	for _, r := range s {
+	for len(b) > 0 {
+		r, n := utf8.DecodeRune(b)
+		b = b[n:]
 		if r == '-' || unicode.IsSpace(r) {
 			continue
 		}

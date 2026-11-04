@@ -63,7 +63,7 @@ func TestRegisterHappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open master: %v", err)
 	}
-	recKEK := keys.Derive(keys.NormalizeRecoveryKey(out.RecoveryKey), u.RecoverySalt, testParams)
+	recKEK := keys.Derive(keys.NormalizeRecoveryKey([]byte(out.RecoveryKey)), u.RecoverySalt, testParams)
 	v2, err := keys.Open(recKEK, u.RecoveryWrappedKey, []byte("pm/recovery/v1|alice@example.com"))
 	if err != nil {
 		t.Fatalf("open recovery: %v", err)
@@ -75,7 +75,7 @@ func TestRegisterHappyPath(t *testing.T) {
 		t.Fatal("blob opened with another email as AAD")
 	}
 
-	secrets := [][]byte{[]byte("SenhaForte1"), []byte(out.RecoveryKey), keys.NormalizeRecoveryKey(out.RecoveryKey), v1}
+	secrets := [][]byte{[]byte("SenhaForte1"), []byte(out.RecoveryKey), keys.NormalizeRecoveryKey([]byte(out.RecoveryKey)), v1}
 	for _, field := range [][]byte{[]byte(u.Email), u.MasterSalt, u.MasterWrappedKey, u.RecoverySalt, u.RecoveryWrappedKey} {
 		for _, s := range secrets {
 			if bytes.Contains(field, s) {

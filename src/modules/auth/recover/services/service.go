@@ -36,7 +36,7 @@ func (s *Service) Recover(ctx context.Context, in dto.Input) (dto.Output, error)
 		return dto.Output{}, autherrors.ErrPasswordMismatch
 	}
 
-	secret := keys.NormalizeRecoveryKey(string(in.RecoveryKey))
+	secret := keys.NormalizeRecoveryKey(in.RecoveryKey)
 	defer keys.Zero(secret)
 
 	email, err := policy.NormalizeEmail(in.Email)
@@ -78,7 +78,7 @@ func (s *Service) Recover(ctx context.Context, in dto.Input) (dto.Output, error)
 	if err != nil {
 		return dto.Output{}, err
 	}
-	newSecret := keys.NormalizeRecoveryKey(recoveryKey)
+	newSecret := keys.NormalizeRecoveryKey([]byte(recoveryKey))
 	defer keys.Zero(newSecret)
 
 	masterKEK := s.Derive(in.Password, masterSalt, params)

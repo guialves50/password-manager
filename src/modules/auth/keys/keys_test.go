@@ -91,12 +91,12 @@ func TestRecoveryKey(t *testing.T) {
 	if k == k2 {
 		t.Fatal("not random")
 	}
-	want := NormalizeRecoveryKey(k)
+	want := NormalizeRecoveryKey([]byte(k))
 	if len(want) != 32 {
 		t.Fatalf("normalized len %d", len(want))
 	}
 	for _, in := range []string{"abcd-efgh ijkl", " ABCDEFGHIJKL ", "aBcD efGH-IjKl"} {
-		if got := NormalizeRecoveryKey(in); string(got) != "ABCDEFGHIJKL" {
+		if got := NormalizeRecoveryKey([]byte(in)); string(got) != "ABCDEFGHIJKL" {
 			t.Errorf("%q -> %q", in, got)
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 
 	"golang.org/x/term"
@@ -21,12 +22,33 @@ type Prompter struct {
 
 func NewTerminalPrompter() *Prompter {
 	return &Prompter{
-		In:  bufio.NewReader(os.Stdin),
-		Out: os.Stdout,
-		ReadSecret: func() ([]byte, error) {
-			return term.ReadPassword(int(os.Stdin.Fd()))
-		},
+		In:         bufio.NewReader(os.Stdin),
+		Out:        os.Stdout,
+		ReadSecret: readSecret,
 	}
+}
+
+func readSecret() ([]byte, error) {
+	fd := int(os.Stdin.Fd())
+	state, err := term.GetState(fd)
+	if err != nil {
+		return nil, err
+	}
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+	defer signal.Stop(sig)
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-sig:
+			term.Restore(fd, state)
+			fmt.Fprintln(os.Stdout)
+			os.Exit(130)
+		case <-done:
+		}
+	}()
+	return term.ReadPassword(fd)
 }
 
 func (p *Prompter) Line(label string) (string, error) {

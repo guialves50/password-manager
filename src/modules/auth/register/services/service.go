@@ -52,7 +52,7 @@ func (s *Service) Register(ctx context.Context, in dto.Input) (dto.Output, error
 	if err != nil {
 		return dto.Output{}, err
 	}
-	recoverySecret := keys.NormalizeRecoveryKey(recoveryKey)
+	recoverySecret := keys.NormalizeRecoveryKey([]byte(recoveryKey))
 	defer keys.Zero(recoverySecret)
 
 	masterKEK := keys.Derive(in.Password, masterSalt, s.Params)

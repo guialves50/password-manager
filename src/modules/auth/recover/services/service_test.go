@@ -71,7 +71,7 @@ func seedUser(t *testing.T, email, pw string) (*user.User, []byte, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rb, err := keys.Seal(keys.Derive(keys.NormalizeRecoveryKey(rk), rs, testParams), vk, []byte("pm/recovery/v1|"+email))
+	rb, err := keys.Seal(keys.Derive(keys.NormalizeRecoveryKey([]byte(rk)), rs, testParams), vk, []byte("pm/recovery/v1|"+email))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestRecoverRotatesKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new master blob: %v", err)
 	}
-	v2, err := keys.Open(keys.Derive(keys.NormalizeRecoveryKey(out.RecoveryKey), r.recoverySalt, testParams), r.recoveryBlob, []byte("pm/recovery/v1|alice@example.com"))
+	v2, err := keys.Open(keys.Derive(keys.NormalizeRecoveryKey([]byte(out.RecoveryKey)), r.recoverySalt, testParams), r.recoveryBlob, []byte("pm/recovery/v1|alice@example.com"))
 	if err != nil {
 		t.Fatalf("new recovery blob: %v", err)
 	}
@@ -132,12 +132,12 @@ func TestRecoverRotatesKeys(t *testing.T) {
 	if _, err := keys.Open(keys.Derive([]byte("SenhaAntiga1"), r.masterSalt, testParams), r.masterBlob, []byte("pm/master/v1|alice@example.com")); err == nil {
 		t.Fatal("old password opens new master blob")
 	}
-	if _, err := keys.Open(keys.Derive(keys.NormalizeRecoveryKey(oldKey), r.recoverySalt, testParams), r.recoveryBlob, []byte("pm/recovery/v1|alice@example.com")); err == nil {
+	if _, err := keys.Open(keys.Derive(keys.NormalizeRecoveryKey([]byte(oldKey)), r.recoverySalt, testParams), r.recoveryBlob, []byte("pm/recovery/v1|alice@example.com")); err == nil {
 		t.Fatal("old recovery key opens new recovery blob")
 	}
 
 	for _, field := range [][]byte{r.masterSalt, r.masterBlob, r.recoverySalt, r.recoveryBlob} {
-		for _, s := range [][]byte{[]byte("SenhaNova1"), []byte(out.RecoveryKey), keys.NormalizeRecoveryKey(out.RecoveryKey), vk} {
+		for _, s := range [][]byte{[]byte("SenhaNova1"), []byte(out.RecoveryKey), keys.NormalizeRecoveryKey([]byte(out.RecoveryKey)), vk} {
 			if bytes.Contains(field, s) {
 				t.Fatalf("secret %q stored in clear", s)
 			}

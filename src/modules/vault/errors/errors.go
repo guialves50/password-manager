@@ -14,9 +14,10 @@ var (
 	ErrNotesLength    = errors.New("notas excedem 4096 caracteres")
 	ErrNameTaken      = errors.New("já existe um item com esse nome")
 	ErrNotFound       = errors.New("item não encontrado")
+	ErrInvalidText    = errors.New("o item contém texto que não é UTF-8 válido")
 )
 
-var known = []error{ErrNameLength, ErrPasswordLength, ErrUsernameLength, ErrURLLength, ErrNotesLength, ErrNameTaken, ErrNotFound}
+var known = []error{ErrNameLength, ErrPasswordLength, ErrUsernameLength, ErrURLLength, ErrNotesLength, ErrNameTaken, ErrNotFound, ErrInvalidText}
 
 func Message(err error) string {
 	for _, k := range known {

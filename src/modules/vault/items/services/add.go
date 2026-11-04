@@ -23,45 +23,50 @@ type AddService struct {
 	Repo addRepo
 }
 
-func (a *AddService) Add(ctx context.Context, s *cli.Session, in dto.Item) error {
+func (a *AddService) Add(ctx context.Context, s *cli.Session, in dto.Item) (int, error) {
+	for _, f := range []string{in.Name, in.Username, in.Password, in.URL, in.Notes} {
+		if !utf8.ValidString(f) {
+			return 0, vaulterrors.ErrInvalidText
+		}
+	}
 	in.Name = strings.TrimSpace(in.Name)
 	n := utf8.RuneCountInString
 	switch {
 	case n(in.Name) < 1 || n(in.Name) > 100:
-		return vaulterrors.ErrNameLength
+		return 0, vaulterrors.ErrNameLength
 	case n(in.Password) < 1 || n(in.Password) > 1024:
-		return vaulterrors.ErrPasswordLength
+		return 0, vaulterrors.ErrPasswordLength
 	case n(in.Username) > 254:
-		return vaulterrors.ErrUsernameLength
+		return 0, vaulterrors.ErrUsernameLength
 	case n(in.URL) > 2048:
-		return vaulterrors.ErrURLLength
+		return 0, vaulterrors.ErrURLLength
 	case n(in.Notes) > 4096:
-		return vaulterrors.ErrNotesLength
+		return 0, vaulterrors.ErrNotesLength
 	}
 
-	items, _, err := decryptAll(ctx, a.Repo, s)
+	items, skipped, err := decryptAll(ctx, a.Repo, s)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	for _, it := range items {
 		if strings.EqualFold(it.Name, in.Name) {
-			return vaulterrors.ErrNameTaken
+			return skipped, vaulterrors.ErrNameTaken
 		}
 	}
 
 	raw, err := keys.Random(16)
 	if err != nil {
-		return err
+		return skipped, err
 	}
 	id := hex.EncodeToString(raw)
 	payload, err := json.Marshal(in)
 	if err != nil {
-		return err
+		return skipped, err
 	}
 	blob, err := keys.Seal(s.VaultKey, payload, aad(s.UserID, id))
 	keys.Zero(payload)
 	if err != nil {
-		return err
+		return skipped, err
 	}
-	return a.Repo.Create(ctx, &repository.Item{ID: id, UserID: s.UserID, Blob: blob})
+	return skipped, a.Repo.Create(ctx, &repository.Item{ID: id, UserID: s.UserID, Blob: blob})
 }

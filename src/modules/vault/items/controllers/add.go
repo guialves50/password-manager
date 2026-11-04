@@ -10,20 +10,24 @@ import (
 	"github.com/guialves50/password-manager/src/modules/vault/items/dto"
 )
 
-type AddFunc func(ctx context.Context, s *cli.Session, in dto.Item) error
+type AddFunc func(ctx context.Context, s *cli.Session, in dto.Item) (int, error)
 
 func NewAdd(add AddFunc) cli.SessionCommand {
 	return func(ctx context.Context, p *cli.Prompter, s *cli.Session, _ string) error {
 		in, err := readItem(p)
+		skipped := 0
 		if err == nil {
-			err = add(ctx, s, in)
+			skipped, err = add(ctx, s, in)
 		}
 		if err != nil {
 			fmt.Fprintln(p.Out, vaulterrors.Message(err))
-			return err
+		} else {
+			fmt.Fprintln(p.Out, "item salvo")
 		}
-		fmt.Fprintln(p.Out, "item salvo")
-		return nil
+		if skipped > 0 {
+			fmt.Fprintf(p.Out, "aviso: %d item(ns) ignorado(s) por falha de integridade\n", skipped)
+		}
+		return err
 	}
 }
 

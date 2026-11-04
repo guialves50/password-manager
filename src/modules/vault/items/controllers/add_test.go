@@ -37,12 +37,12 @@ func session() *cli.Session {
 func TestAddHappyPath(t *testing.T) {
 	s := session()
 	var got []dto.Item
-	add := func(_ context.Context, cs *cli.Session, in dto.Item) error {
+	add := func(_ context.Context, cs *cli.Session, in dto.Item) (int, error) {
 		if cs != s {
 			t.Errorf("session %v", cs)
 		}
 		got = append(got, in)
-		return nil
+		return 0, nil
 	}
 	p, out := prompter("gmail\nalice@gmail.com\nhttps://mail.google.com\nconta pessoal\n", "S3nhaDoGmail")
 
@@ -70,10 +70,11 @@ func TestAddErrors(t *testing.T) {
 		{vaulterrors.ErrURLLength, "URL excede 2048 caracteres\n"},
 		{vaulterrors.ErrNotesLength, "notas excedem 4096 caracteres\n"},
 		{vaulterrors.ErrNameTaken, "já existe um item com esse nome\n"},
+		{vaulterrors.ErrInvalidText, "o item contém texto que não é UTF-8 válido\n"},
 		{boom, "erro interno\n"},
 	}
 	for _, c := range cases {
-		add := func(context.Context, *cli.Session, dto.Item) error { return c.err }
+		add := func(context.Context, *cli.Session, dto.Item) (int, error) { return 0, c.err }
 		p, out := prompter("gmail\n\n\n\n", "S3nhaDoGmail")
 		err := NewAdd(add)(context.Background(), p, session(), "")
 		if err != c.err {
@@ -100,7 +101,7 @@ func TestAddEOFAtAnyPromptCancels(t *testing.T) {
 	}
 	for _, c := range cases {
 		calls := 0
-		add := func(context.Context, *cli.Session, dto.Item) error { calls++; return nil }
+		add := func(context.Context, *cli.Session, dto.Item) (int, error) { calls++; return 0, nil }
 		p, out := prompter(c.lines, c.secrets...)
 		err := NewAdd(add)(context.Background(), p, session(), "")
 		if !errors.Is(err, io.EOF) || calls != 0 {
@@ -108,6 +109,27 @@ func TestAddEOFAtAnyPromptCancels(t *testing.T) {
 		}
 		if o := out.String(); o != c.want+"operação cancelada\n" {
 			t.Errorf("%s: out %q", c.name, o)
+		}
+	}
+}
+
+func TestAddWarnsAboutSkippedItems(t *testing.T) {
+	warn := "aviso: 2 item(ns) ignorado(s) por falha de integridade\n"
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{nil, "item salvo\n" + warn},
+		{vaulterrors.ErrNameTaken, "já existe um item com esse nome\n" + warn},
+	}
+	for _, c := range cases {
+		add := func(context.Context, *cli.Session, dto.Item) (int, error) { return 2, c.err }
+		p, out := prompter("gmail\n\n\n\n", "S3nhaDoGmail")
+		if err := NewAdd(add)(context.Background(), p, session(), ""); err != c.err {
+			t.Errorf("%v: err %v", c.err, err)
+		}
+		if o := out.String(); o != "nome: usuário: senha: \nurl: notas: "+c.want {
+			t.Errorf("%v: out %q", c.err, o)
 		}
 	}
 }

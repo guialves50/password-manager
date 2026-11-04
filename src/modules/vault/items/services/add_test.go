@@ -13,6 +13,7 @@ import (
 	"github.com/guialves50/password-manager/src/modules/auth/keys"
 	vaulterrors "github.com/guialves50/password-manager/src/modules/vault/errors"
 	"github.com/guialves50/password-manager/src/modules/vault/items/dto"
+	"github.com/guialves50/password-manager/src/modules/vault/items/repository"
 )
 
 func valid() dto.Item {
@@ -25,7 +26,7 @@ func TestAddSealsItemWithVaultKey(t *testing.T) {
 	in := valid()
 	in.Name = "  gmail  "
 
-	if err := (&AddService{Repo: repo}).Add(context.Background(), s, in); err != nil {
+	if _, err := (&AddService{Repo: repo}).Add(context.Background(), s, in); err != nil {
 		t.Fatal(err)
 	}
 	if len(repo.created) != 1 {
@@ -64,7 +65,7 @@ func TestAddGeneratesRandomIDs(t *testing.T) {
 	for _, name := range []string{"a", "b"} {
 		in := valid()
 		in.Name = name
-		if err := svc.Add(context.Background(), s, in); err != nil {
+		if _, err := svc.Add(context.Background(), s, in); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -103,7 +104,7 @@ func TestAddLimitsInRunes(t *testing.T) {
 	}
 	for _, c := range cases {
 		repo := &fakeRepo{}
-		err := (&AddService{Repo: repo}).Add(context.Background(), session(t), c.in)
+		_, err := (&AddService{Repo: repo}).Add(context.Background(), session(t), c.in)
 		if err != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, err, c.want)
 		}
@@ -123,12 +124,12 @@ func TestAddRejectsDuplicateNameIgnoringCase(t *testing.T) {
 	svc := &AddService{Repo: repo}
 	in := valid()
 	in.Name = "Gmail"
-	if err := svc.Add(context.Background(), s, in); err != nil {
+	if _, err := svc.Add(context.Background(), s, in); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"gmail", " GMAIL "} {
 		in.Name = name
-		if err := svc.Add(context.Background(), s, in); err != vaulterrors.ErrNameTaken {
+		if _, err := svc.Add(context.Background(), s, in); err != vaulterrors.ErrNameTaken {
 			t.Errorf("%q: got %v", name, err)
 		}
 	}
@@ -143,11 +144,11 @@ func TestAddRejectsDuplicateNameIgnoringCase(t *testing.T) {
 func TestAddRepoErrors(t *testing.T) {
 	boom := errors.New("db down")
 	repo := &fakeRepo{listErr: boom}
-	if err := (&AddService{Repo: repo}).Add(context.Background(), session(t), valid()); !errors.Is(err, boom) || len(repo.created) != 0 {
+	if _, err := (&AddService{Repo: repo}).Add(context.Background(), session(t), valid()); !errors.Is(err, boom) || len(repo.created) != 0 {
 		t.Fatalf("list error: %v created %d", err, len(repo.created))
 	}
 	repo = &fakeRepo{createErr: boom}
-	if err := (&AddService{Repo: repo}).Add(context.Background(), session(t), valid()); !errors.Is(err, boom) {
+	if _, err := (&AddService{Repo: repo}).Add(context.Background(), session(t), valid()); !errors.Is(err, boom) {
 		t.Fatalf("create error: %v", err)
 	}
 }
@@ -157,7 +158,7 @@ func TestAddIDIsIndependentOfName(t *testing.T) {
 	var ids []string
 	for range 2 {
 		repo := &fakeRepo{}
-		if err := (&AddService{Repo: repo}).Add(context.Background(), s, valid()); err != nil {
+		if _, err := (&AddService{Repo: repo}).Add(context.Background(), s, valid()); err != nil {
 			t.Fatal(err)
 		}
 		ids = append(ids, repo.created[0].ID)
@@ -190,11 +191,47 @@ func TestAddTreatsInnerSpacesAsDistinctNames(t *testing.T) {
 	for _, name := range []string{"conta banco", "conta  banco"} {
 		in := valid()
 		in.Name = name
-		if err := svc.Add(context.Background(), s, in); err != nil {
+		if _, err := svc.Add(context.Background(), s, in); err != nil {
 			t.Fatalf("%q: %v", name, err)
 		}
 	}
 	if len(repo.created) != 2 {
 		t.Fatalf("created %d", len(repo.created))
+	}
+}
+
+func TestAddReportsSkippedItems(t *testing.T) {
+	s := session(t)
+	tampered := row(t, s, "id-1", dto.Item{Name: "bad", Password: "p"})
+	tampered.Blob[0] ^= 1
+	repo := &fakeRepo{rows: []repository.Item{tampered}}
+
+	skipped, err := (&AddService{Repo: repo}).Add(context.Background(), s, valid())
+	if err != nil || skipped != 1 || len(repo.created) != 1 {
+		t.Fatalf("skipped %d err %v created %d", skipped, err, len(repo.created))
+	}
+
+	in := valid()
+	repo.rows = append(repo.rows, repo.created[0])
+	if skipped, err := (&AddService{Repo: repo}).Add(context.Background(), s, in); err != vaulterrors.ErrNameTaken || skipped != 1 {
+		t.Fatalf("duplicate: skipped %d err %v", skipped, err)
+	}
+}
+
+func TestAddRejectsInvalidUTF8(t *testing.T) {
+	bad := "S3nha\xff"
+	for name, f := range map[string]func(*dto.Item){
+		"name":     func(in *dto.Item) { in.Name = bad },
+		"username": func(in *dto.Item) { in.Username = bad },
+		"password": func(in *dto.Item) { in.Password = bad },
+		"url":      func(in *dto.Item) { in.URL = bad },
+		"notes":    func(in *dto.Item) { in.Notes = bad },
+	} {
+		in := valid()
+		f(&in)
+		repo := &fakeRepo{}
+		if _, err := (&AddService{Repo: repo}).Add(context.Background(), session(t), in); err != vaulterrors.ErrInvalidText || len(repo.created) != 0 {
+			t.Errorf("%s: err %v created %d", name, err, len(repo.created))
+		}
 	}
 }

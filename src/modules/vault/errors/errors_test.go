@@ -16,6 +16,7 @@ func TestMessages(t *testing.T) {
 		ErrNotesLength:    "notas excedem 4096 caracteres",
 		ErrNameTaken:      "já existe um item com esse nome",
 		ErrNotFound:       "item não encontrado",
+		ErrInvalidText:    "o item contém texto que não é UTF-8 válido",
 	}
 	for err, want := range cases {
 		if got := err.Error(); got != want {

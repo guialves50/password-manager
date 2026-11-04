@@ -19,7 +19,7 @@ func New(login LoginFunc) cli.Command {
 			fmt.Fprintln(p.Out, autherrors.Message(err))
 			return err
 		}
-		cli.Shell(p.In, p.Out, s)
+		cli.Shell(ctx, p, s, nil)
 		return nil
 	}
 }

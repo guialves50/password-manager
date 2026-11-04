@@ -53,3 +53,17 @@ func TestStartUnreachableDatabase(t *testing.T) {
 		t.Fatalf("stderr %q out %q", stderr.String(), out.String())
 	}
 }
+
+func TestStartUsageWithoutDatabase(t *testing.T) {
+	connect := func() (*gorm.DB, error) {
+		t.Fatal("connected to the database before checking the command")
+		return nil, nil
+	}
+	p := &cli.Prompter{In: bufio.NewReader(strings.NewReader("")), Out: &bytes.Buffer{}}
+	for _, args := range [][]string{nil, {"nope"}} {
+		var stderr bytes.Buffer
+		if code := start(connect, args, p, &stderr); code != 2 || stderr.String() != "uso: pm <register|login|recover>\n" {
+			t.Errorf("%v: code %d stderr %q", args, code, stderr.String())
+		}
+	}
+}

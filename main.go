@@ -6,6 +6,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"slices"
 
 	"github.com/guialves50/password-manager/src/cli"
 	"github.com/guialves50/password-manager/src/database"
@@ -15,10 +16,14 @@ import (
 	"gorm.io/gorm"
 )
 
+func usage(stderr io.Writer) int {
+	fmt.Fprintln(stderr, "uso: pm <register|login|recover>")
+	return 2
+}
+
 func run(args []string, routes map[string]cli.Command, p *cli.Prompter, stderr io.Writer) int {
 	if len(args) == 0 || routes[args[0]] == nil {
-		fmt.Fprintln(stderr, "uso: pm <register|login|recover>")
-		return 2
+		return usage(stderr)
 	}
 	if err := routes[args[0]](context.Background(), p); err != nil {
 		return 1
@@ -27,6 +32,9 @@ func run(args []string, routes map[string]cli.Command, p *cli.Prompter, stderr i
 }
 
 func start(connect func() (*gorm.DB, error), args []string, p *cli.Prompter, stderr io.Writer) int {
+	if len(args) == 0 || !slices.Contains([]string{"register", "login", "recover"}, args[0]) {
+		return usage(stderr)
+	}
 	db, err := connect()
 	if err != nil {
 		fmt.Fprintln(stderr, "não foi possível conectar ao banco de dados")

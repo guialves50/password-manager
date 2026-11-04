@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -47,5 +48,21 @@ func TestListPropagatesRepoError(t *testing.T) {
 	boom := errors.New("db down")
 	if _, _, err := (&ListService{Repo: &fakeRepo{listErr: boom}}).List(context.Background(), session(t)); !errors.Is(err, boom) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestListOrdersByLowercaseBytes(t *testing.T) {
+	s := session(t)
+	var rows []repository.Item
+	for i, name := range []string{"zoom", "Ábaco", "ab", "a_b", "Amazon"} {
+		rows = append(rows, row(t, s, fmt.Sprintf("id-%d", i), dto.Item{Name: name, Password: "p"}))
+	}
+
+	names, _, err := (&ListService{Repo: &fakeRepo{rows: rows}}).List(context.Background(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"a_b", "ab", "Amazon", "zoom", "Ábaco"}; !slices.Equal(names, want) {
+		t.Fatalf("names %q, want %q", names, want)
 	}
 }

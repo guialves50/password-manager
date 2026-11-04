@@ -25,7 +25,10 @@ func TestDeleteDuplicateRemovesOldest(t *testing.T) {
 	if err := tx.Create(&u).Error; err != nil {
 		t.Fatal(err)
 	}
-	vk, _ := keys.Random(32)
+	vk, err := keys.Random(32)
+	if err != nil {
+		t.Fatal(err)
+	}
 	base := time.Now().Add(-time.Hour)
 	for i, id := range []string{strings.Repeat("b", 32), strings.Repeat("a", 32)} {
 		blob, err := keys.Seal(vk, []byte(`{"name":"gmail","password":"p"}`), fmt.Appendf(nil, "pm/item/v1|%d|%s", u.ID, id))

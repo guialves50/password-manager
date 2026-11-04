@@ -5,6 +5,7 @@ import (
 
 	"gorm.io/gorm"
 
+	autherrors "github.com/guialves50/password-manager/src/modules/auth/errors"
 	"github.com/guialves50/password-manager/src/modules/user"
 )
 
@@ -16,8 +17,8 @@ func New(db *gorm.DB) *Repository {
 	return &Repository{db: db}
 }
 
-func (r *Repository) RotateKeys(ctx context.Context, id uint64, masterSalt, masterBlob, recoverySalt, recoveryBlob []byte) error {
-	res := r.db.WithContext(ctx).Model(&user.User{}).Where("id = ?", id).Updates(map[string]any{
+func (r *Repository) RotateKeys(ctx context.Context, id uint64, verifiedRecoveryBlob, masterSalt, masterBlob, recoverySalt, recoveryBlob []byte) error {
+	res := r.db.WithContext(ctx).Model(&user.User{}).Where("id = ? AND recovery_wrapped_key = ?", id, verifiedRecoveryBlob).Updates(map[string]any{
 		"master_salt":          masterSalt,
 		"master_wrapped_key":   masterBlob,
 		"recovery_salt":        recoverySalt,
@@ -29,7 +30,7 @@ func (r *Repository) RotateKeys(ctx context.Context, id uint64, masterSalt, mast
 		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
+		return autherrors.ErrInvalidRecovery
 	}
 	return nil
 }

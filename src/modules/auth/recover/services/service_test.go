@@ -18,8 +18,8 @@ import (
 var testParams = keys.Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}
 
 type rotation struct {
-	id                                                 uint64
-	masterSalt, masterBlob, recoverySalt, recoveryBlob []byte
+	id                                                           uint64
+	verified, masterSalt, masterBlob, recoverySalt, recoveryBlob []byte
 }
 
 type fakeRepo struct {
@@ -46,8 +46,8 @@ func (f *fakeRepo) RecordFailure(_ context.Context, id uint64) error {
 	return nil
 }
 
-func (f *fakeRepo) RotateKeys(_ context.Context, id uint64, ms, mb, rs, rb []byte) error {
-	f.rotated = append(f.rotated, rotation{id, ms, mb, rs, rb})
+func (f *fakeRepo) RotateKeys(_ context.Context, id uint64, verified, ms, mb, rs, rb []byte) error {
+	f.rotated = append(f.rotated, rotation{id, verified, ms, mb, rs, rb})
 	return f.rotateErr
 }
 
@@ -114,6 +114,9 @@ func TestRecoverRotatesKeys(t *testing.T) {
 	r := repo.rotated[0]
 	if r.id != 42 || len(r.masterSalt) != 16 || len(r.recoverySalt) != 16 {
 		t.Fatalf("rotation %+v", r)
+	}
+	if !bytes.Equal(r.verified, u.RecoveryWrappedKey) {
+		t.Fatal("rotation not conditioned on the verified recovery blob")
 	}
 	if bytes.Equal(r.masterSalt, oldMasterSalt) || bytes.Equal(r.recoverySalt, oldRecoverySalt) || bytes.Equal(r.masterSalt, r.recoverySalt) {
 		t.Fatal("salts not renewed")

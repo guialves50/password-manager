@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/guialves50/password-manager/src/database"
+	autherrors "github.com/guialves50/password-manager/src/modules/auth/errors"
 	"github.com/guialves50/password-manager/src/modules/auth/recover/repository"
 	"github.com/guialves50/password-manager/src/modules/user"
-	"gorm.io/gorm"
 )
 
 func TestRotateKeysReplacesKeysAndResetsLockout(t *testing.T) {
@@ -28,7 +28,7 @@ func TestRotateKeysReplacesKeysAndResetsLockout(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := repository.New(db).RotateKeys(ctx, u.ID, []byte("s2"), []byte("m2"), []byte("r2"), []byte("k2")); err != nil {
+	if err := repository.New(db).RotateKeys(ctx, u.ID, []byte("k"), []byte("s2"), []byte("m2"), []byte("r2"), []byte("k2")); err != nil {
 		t.Fatal(err)
 	}
 	var got user.User
@@ -48,8 +48,37 @@ func TestRotateKeysReplacesKeysAndResetsLockout(t *testing.T) {
 
 func TestRotateKeysMissingUser(t *testing.T) {
 	db := database.TestTx(t)
-	err := repository.New(db).RotateKeys(context.Background(), 0, []byte("s"), []byte("m"), []byte("r"), []byte("k"))
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
+	err := repository.New(db).RotateKeys(context.Background(), 0, []byte("k"), []byte("s"), []byte("m"), []byte("r"), []byte("k"))
+	if !errors.Is(err, autherrors.ErrInvalidRecovery) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestRotateKeysRejectsStaleRecoveryBlob(t *testing.T) {
+	db := database.TestTx(t)
+	ctx := context.Background()
+	u := &user.User{
+		Email: "race@example.com", KDFTime: 3, KDFMemoryKiB: 65536, KDFThreads: 4,
+		MasterSalt: []byte("s"), MasterWrappedKey: []byte("m"),
+		RecoverySalt: []byte("r"), RecoveryWrappedKey: []byte("k"),
+	}
+	if err := db.Create(u).Error; err != nil {
+		t.Fatal(err)
+	}
+	repo := repository.New(db)
+	if err := repo.RotateKeys(ctx, u.ID, []byte("k"), []byte("s2"), []byte("m2"), []byte("r2"), []byte("k2")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := repo.RotateKeys(ctx, u.ID, []byte("k"), []byte("s3"), []byte("m3"), []byte("r3"), []byte("k3"))
+	if !errors.Is(err, autherrors.ErrInvalidRecovery) {
+		t.Fatalf("second rotation with the stale blob: got %v", err)
+	}
+	var got user.User
+	if err := db.First(&got, u.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if string(got.MasterWrappedKey) != "m2" || string(got.RecoveryWrappedKey) != "k2" {
+		t.Fatalf("first recovery overwritten: %q %q", got.MasterWrappedKey, got.RecoveryWrappedKey)
 	}
 }

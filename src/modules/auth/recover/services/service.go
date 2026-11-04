@@ -15,7 +15,7 @@ import (
 type userStore interface {
 	FindByEmail(ctx context.Context, email string) (*user.User, error)
 	RecordFailure(ctx context.Context, id uint64) error
-	RotateKeys(ctx context.Context, id uint64, masterSalt, masterBlob, recoverySalt, recoveryBlob []byte) error
+	RotateKeys(ctx context.Context, id uint64, verifiedRecoveryBlob, masterSalt, masterBlob, recoverySalt, recoveryBlob []byte) error
 }
 
 type Service struct {
@@ -94,7 +94,7 @@ func (s *Service) Recover(ctx context.Context, in dto.Input) (dto.Output, error)
 	if err != nil {
 		return dto.Output{}, err
 	}
-	if err := s.Repo.RotateKeys(ctx, u.ID, masterSalt, masterBlob, recoverySalt, recoveryBlob); err != nil {
+	if err := s.Repo.RotateKeys(ctx, u.ID, u.RecoveryWrappedKey, masterSalt, masterBlob, recoverySalt, recoveryBlob); err != nil {
 		return dto.Output{}, err
 	}
 	return dto.Output{RecoveryKey: recoveryKey}, nil

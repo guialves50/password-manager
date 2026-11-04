@@ -17,8 +17,8 @@ type store struct {
 	rotator *repository.Repository
 }
 
-func (s store) RotateKeys(ctx context.Context, id uint64, masterSalt, masterBlob, recoverySalt, recoveryBlob []byte) error {
-	return s.rotator.RotateKeys(ctx, id, masterSalt, masterBlob, recoverySalt, recoveryBlob)
+func (s store) RotateKeys(ctx context.Context, id uint64, verifiedRecoveryBlob, masterSalt, masterBlob, recoverySalt, recoveryBlob []byte) error {
+	return s.rotator.RotateKeys(ctx, id, verifiedRecoveryBlob, masterSalt, masterBlob, recoverySalt, recoveryBlob)
 }
 
 func Routes(db *gorm.DB) map[string]cli.Command {

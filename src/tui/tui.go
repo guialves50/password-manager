@@ -71,10 +71,12 @@ func (u *UI) Prompter() *cli.Prompter {
 		OnSession: func(s *cli.Session) {
 			u.mu.Lock()
 			defer u.mu.Unlock()
-			u.email, u.log, u.art, u.checkAt = "", nil, nil, time.Time{}
-			if s != nil {
-				u.email = s.Email
+			u.email, u.log, u.art = "", nil, nil
+			if s == nil {
+				u.checkAt = time.Time{}
+				return
 			}
+			u.email = s.Email // keep a running ✓: a 2FA login plays it while the vault opens
 		},
 		ShowArt: func(lines []string) {
 			u.mu.Lock()

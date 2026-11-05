@@ -433,3 +433,20 @@ func TestTallQRUsesHeaderRows(t *testing.T) {
 		t.Fatalf("screen %q", screen)
 	}
 }
+
+func TestCheckSurvivesVaultOpeningButNotLogout(t *testing.T) {
+	c := &clock{t: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	u := New("x")
+	u.now = c.now
+	p := u.Prompter()
+	p.ShowCheck()
+	p.OnSession(&cli.Session{Email: "a@b.com"})
+	c.t = c.t.Add(time.Second)
+	if raw := center(u.Render(100, 30)); !strings.Contains(raw, checkColor) || u.email != "a@b.com" {
+		t.Fatal("check cleared when the vault opened")
+	}
+	p.OnSession(nil)
+	if raw := center(u.Render(100, 30)); strings.Contains(raw, checkColor) {
+		t.Fatal("check kept after logout")
+	}
+}

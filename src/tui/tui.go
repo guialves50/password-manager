@@ -48,10 +48,14 @@ type UI struct {
 	esc      int
 	pending  []byte
 	leftover []byte
+	clearAt  time.Time
+	now      func() time.Time
 }
 
+const idleClear = 5 * time.Second
+
 func New(server string) *UI {
-	return &UI{server: server}
+	return &UI{server: server, now: time.Now}
 }
 
 func (u *UI) Prompter() *cli.Prompter {
@@ -62,7 +66,7 @@ func (u *UI) Prompter() *cli.Prompter {
 		OnSession: func(s *cli.Session) {
 			u.mu.Lock()
 			defer u.mu.Unlock()
-			u.email = ""
+			u.email, u.log = "", nil
 			if s != nil {
 				u.email = s.Email
 			}
@@ -91,6 +95,10 @@ func (u *UI) request(secret bool) result {
 	ch := make(chan result, 1)
 	u.mu.Lock()
 	u.secret, u.waiting = secret, ch
+	u.clearAt = time.Time{}
+	if !secret && u.atTop() {
+		u.clearAt = u.now().Add(idleClear)
+	}
 	u.mu.Unlock()
 	return <-ch
 }
@@ -181,6 +189,20 @@ func (u *UI) answer(r result) {
 	if u.waiting != nil {
 		u.waiting <- r
 		u.waiting = nil
+		u.clearAt = time.Time{}
+	}
+}
+
+func (u *UI) atTop() bool {
+	return u.partial == "" || strings.HasSuffix(u.partial, "> ")
+}
+
+func (u *UI) Tick() {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.angle += 0.08
+	if !u.clearAt.IsZero() && !u.now().Before(u.clearAt) {
+		u.log, u.clearAt = nil, time.Time{}
 	}
 }
 
@@ -261,7 +283,7 @@ func (u *UI) Render(w, h int) []string {
 	switch {
 	case u.secret && u.waiting != nil:
 		text, after = nil, dim+"(oculto)"
-	case len(text) == 0 && (u.partial == "" || strings.HasSuffix(u.partial, "> ")):
+	case len(text) == 0 && u.atTop():
 		after = dim + hint
 	}
 	if room := w - 3 - utf8.RuneCountInString(label); len(text) > room {
@@ -327,9 +349,7 @@ func Run(server string, app func(p *cli.Prompter)) error {
 				if err != nil {
 					continue
 				}
-				u.mu.Lock()
-				u.angle += 0.08
-				u.mu.Unlock()
+				u.Tick()
 				var b strings.Builder
 				for i, l := range u.Render(w, h) {
 					fmt.Fprintf(&b, "\x1b[%d;1H%s", i+1, l)

@@ -294,3 +294,116 @@ func TestTimerRestartsAfterEachCommand(t *testing.T) {
 	u.Feed([]byte("\x03"))
 	<-done
 }
+
+func center(screen []string) string {
+	return strings.Join(screen[6:len(screen)-4], "\n")
+}
+
+func TestQRReplacesShieldEvenOverLog(t *testing.T) {
+	u := New("x")
+	p := u.Prompter()
+	u.Write([]byte("guardian> 2fa\n"))
+	p.ShowArt([]string{"\x1b[38;5;16m▀▀▀\x1b[0m", "\x1b[38;5;16m▀▀▀\x1b[0m", "", "chave: ABCD"})
+	screen := plain(u.Render(100, 30))
+	mid := center(screen)
+	if !strings.Contains(mid, "▀▀▀") || !strings.Contains(mid, "chave: ABCD") || strings.Contains(mid, "guardian> 2fa") {
+		t.Fatalf("center %q", mid)
+	}
+	if strings.ContainsRune(mid, 0x2801) {
+		t.Fatal("shield drawn with QR")
+	}
+	p.ShowArt(nil)
+	if mid := center(plain(u.Render(100, 30))); !strings.Contains(mid, "guardian> 2fa") {
+		t.Fatalf("after clear %q", mid)
+	}
+}
+
+func TestQRTooBigShowsWarningAndKey(t *testing.T) {
+	u := New("x")
+	art := make([]string, 30)
+	for i := range art {
+		art[i] = strings.Repeat("▀", 40)
+	}
+	art[29] = "chave: ABCD"
+	u.Prompter().ShowArt(art)
+	mid := center(plain(u.Render(100, 30)))
+	if !strings.Contains(mid, "aumente o terminal para ver o QR Code") || !strings.Contains(mid, "chave: ABCD") || strings.Contains(mid, "▀") {
+		t.Fatalf("center %q", mid)
+	}
+}
+
+func dots(s string) int {
+	n := 0
+	for _, r := range s {
+		if r > 0x2800 && r <= 0x28ff {
+			for b := r - 0x2800; b > 0; b &= b - 1 {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func TestCheckFormsThenShieldReturns(t *testing.T) {
+	c := &clock{t: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	u := New("x")
+	u.now = c.now
+	p := u.Prompter()
+	u.Write([]byte("código 2FA: 123456\n2FA ativado\n"))
+	p.ShowArt([]string{"qr"})
+	p.ShowCheck()
+
+	at := func(d time.Duration) (string, string) {
+		c.t = c.t.Add(d)
+		raw := u.Render(100, 30)
+		return center(raw), center(plain(raw))
+	}
+	rawStart, _ := at(100 * time.Millisecond)
+	rawHalf, half := at(400 * time.Millisecond)
+	rawFull, full := at(500 * time.Millisecond)
+	_, held := at(1900 * time.Millisecond)
+	if !strings.Contains(rawHalf, checkColor) || !strings.Contains(rawFull, checkColor) {
+		t.Fatal("check not drawn")
+	}
+	if !(dots(rawStart) < dots(half) && dots(half) < dots(full)) {
+		t.Fatalf("not forming: %d %d %d", dots(rawStart), dots(half), dots(full))
+	}
+	if dots(held) != dots(full) || strings.Contains(full, "2FA ativado") || strings.Contains(full, "qr") {
+		t.Fatalf("held %d full %d %q", dots(held), dots(full), full)
+	}
+	rawAfter, _ := at(100 * time.Millisecond)
+	if strings.Contains(rawAfter, checkColor) || dots(rawAfter) == 0 {
+		t.Fatal("shield did not return after 3s")
+	}
+}
+
+func TestCheckIsCentered(t *testing.T) {
+	lo, hi := columns(check(1, 80, 20))
+	if hi < 0 || (lo+hi)/2 < 30 || (lo+hi)/2 > 50 {
+		t.Fatalf("check columns %d..%d", lo, hi)
+	}
+}
+
+func TestLogoutClearsQR(t *testing.T) {
+	u := New("x")
+	p := u.Prompter()
+	p.ShowArt([]string{"qr"})
+	p.OnSession(nil)
+	if u.art != nil {
+		t.Fatal("art kept after logout")
+	}
+}
+
+func TestTallQRUsesHeaderRows(t *testing.T) {
+	u := New("x")
+	art := make([]string, 25)
+	for i := range art {
+		art[i] = strings.Repeat("▀", 41)
+	}
+	art[24] = "chave: ABCD"
+	u.Prompter().ShowArt(art)
+	screen := plain(u.Render(100, 30))
+	if !strings.Contains(screen[1], "▀") || !strings.Contains(screen[25], "chave: ABCD") || strings.Contains(strings.Join(screen, ""), "aumente o terminal") {
+		t.Fatalf("screen %q", screen)
+	}
+}

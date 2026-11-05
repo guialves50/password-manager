@@ -79,13 +79,13 @@ func TestSmokeEndToEnd(t *testing.T) {
 	}
 
 	item := "gmail\nalice@gmail.com\n\nhttps://mail.google.com\nconta pessoal\n"
-	added := "pm> nome: usuário: comprimento (20): url: notas: item salvo\n"
+	added := "guardian> nome: usuário: comprimento (20): url: notas: item salvo\n"
 	wantRe := regexp.MustCompile("^" + regexp.QuoteMeta("email: senha mestra: \n"+added+
-		"pm> gmail\n"+
-		"pm> nome: gmail\nusuário: alice@gmail.com\nsenha: ") + `([A-Za-z0-9!@#$%^&*()\-_=+\[\]{};:,.?/]{20})` + regexp.QuoteMeta("\nurl: https://mail.google.com\nnotas: conta pessoal\n"+
-		"pm> remover gmail? (s/N) item removido\n"+
-		"pm> cofre vazio\n"+
-		"pm> ") + "$")
+		"guardian> gmail\n"+
+		"guardian> nome: gmail\nusuário: alice@gmail.com\nsenha: ") + `([A-Za-z0-9!@#$%^&*()\-_=+\[\]{};:,.?/]{20})` + regexp.QuoteMeta("\nurl: https://mail.google.com\nnotas: conta pessoal\n"+
+		"guardian> remover gmail? (s/N) item removido\n"+
+		"guardian> cofre vazio\n"+
+		"guardian> ") + "$")
 	out = step("login vault", 0, added, []string{"login"}, email+"\nadd\n"+item+"list\nget GMAIL\ndelete gmail\ns\nlist\nexit\n", "SenhaAntiga1")
 	if wantRe.FindStringSubmatch(out) == nil {
 		t.Fatalf("login vault: out %q", out)
@@ -105,12 +105,12 @@ func TestSmokeEndToEnd(t *testing.T) {
 		t.Fatalf("no new recovery key in %q", out)
 	}
 
-	step("login new", 0, "pm> ", []string{"login"}, email+"\nexit\n", "SenhaNova1")
+	step("login new", 0, "guardian> ", []string{"login"}, email+"\nexit\n", "SenhaNova1")
 	step("login old", 1, "email ou senha mestra inválidos\n", []string{"login"}, email+"\n", "SenhaAntiga1")
 	step("recover old key", 1, "email ou chave de recuperação inválidos\n", []string{"recover"}, email+"\n", oldKey, "SenhaOutra1", "SenhaOutra1")
 	step("recover new key", 0, "senha mestra redefinida\n", []string{"recover"}, email+"\n", m[1], "SenhaOutra1", "SenhaOutra1")
 
-	want := "email: senha mestra: \n" + added + "pm> "
+	want := "email: senha mestra: \n" + added + "guardian> "
 	item32 := strings.Replace(item, "\n\n", "\n32\n", 1)
 	if out := step("vault add again", 0, want, []string{"login"}, email+"\nadd\n"+item32+"exit\n", "SenhaOutra1"); out != want {
 		t.Fatalf("vault add again: out %q", out)
@@ -166,7 +166,7 @@ func TestSmokeEndToEnd(t *testing.T) {
 	if res.Error != nil || res.RowsAffected != 1 {
 		t.Fatalf("copy blob: %d, %v", res.RowsAffected, res.Error)
 	}
-	want = "email: senha mestra: \npm> cofre vazio\naviso: 1 item(ns) ignorado(s) por falha de integridade\npm> "
+	want = "email: senha mestra: \nguardian> cofre vazio\naviso: 1 item(ns) ignorado(s) por falha de integridade\nguardian> "
 	if out := step("moved blob", 0, want, []string{"login"}, email2+"\nlist\nexit\n", "SenhaSegunda1"); out != want {
 		t.Fatalf("moved blob: out %q", out)
 	}

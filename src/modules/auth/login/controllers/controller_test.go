@@ -62,7 +62,7 @@ func TestLoginOpensShellAndZeroesKeyOnExit(t *testing.T) {
 		t.Fatalf("input %q %q", got.Email, got.Password)
 	}
 	o := out.String()
-	if !strings.HasSuffix(o, "pm> comando desconhecido\npm> ") || strings.Contains(o, "SenhaForte1") {
+	if !strings.HasSuffix(o, "guardian> comando desconhecido\nguardian> ") || strings.Contains(o, "SenhaForte1") {
 		t.Fatalf("out %q", o)
 	}
 	vk := bytes.Repeat([]byte{9}, 32)
@@ -96,7 +96,7 @@ func TestLoginForwardsCommandsToShell(t *testing.T) {
 	if len(args) != 1 || args[0] != "conta banco" {
 		t.Fatalf("args %q", args)
 	}
-	if o := out.String(); !strings.HasSuffix(o, "pm> ok\npm> ") {
+	if o := out.String(); !strings.HasSuffix(o, "guardian> ok\nguardian> ") {
 		t.Fatalf("out %q", o)
 	}
 	if !bytes.Equal(s.VaultKey, make([]byte, 32)) {
@@ -131,7 +131,7 @@ func TestLoginErrors(t *testing.T) {
 		if err == nil || !strings.HasSuffix(o, c.want) {
 			t.Errorf("%s: err %v out %q", c.name, err, o)
 		}
-		if strings.Contains(o, "pm> ") || strings.Contains(o, "SenhaErrada1") {
+		if strings.Contains(o, "guardian> ") || strings.Contains(o, "SenhaErrada1") {
 			t.Errorf("%s: unexpected output %q", c.name, o)
 		}
 		if len(spy.tokens) != 0 {
@@ -152,9 +152,9 @@ func TestLoginLogsOutWhenShellEnds(t *testing.T) {
 		name, lines, wantSuffix string
 		cmds                    map[string]cli.SessionCommand
 	}{
-		{"logout", "alice@example.com\nlogout\nnot-read\n", "pm> ", nil},
-		{"eof", "alice@example.com\n", "pm> \n", nil},
-		{"expired", "alice@example.com\nlist\nlist\n", "pm> sessão expirada, faça login novamente\n", expired},
+		{"logout", "alice@example.com\nlogout\nnot-read\n", "guardian> ", nil},
+		{"eof", "alice@example.com\n", "guardian> \n", nil},
+		{"expired", "alice@example.com\nlist\nlist\n", "guardian> sessão expirada, faça login novamente\n", expired},
 	}
 	for _, c := range cases {
 		s := &cli.Session{UserID: 1, Email: "alice@example.com", VaultKey: bytes.Repeat([]byte{9}, 32), Token: "tok-" + c.name}

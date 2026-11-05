@@ -18,6 +18,7 @@ type Prompter struct {
 	In         *bufio.Reader
 	Out        io.Writer
 	ReadSecret func() ([]byte, error)
+	OnSession  func(*Session)
 }
 
 func NewTerminalPrompter() *Prompter {

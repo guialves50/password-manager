@@ -38,7 +38,7 @@ func TestShellExitCommandsStopAndZeroKey(t *testing.T) {
 	for _, cmd := range []string{"exit", "logout", "  exit  "} {
 		s := newSession()
 		out := run(cmd+"\nfoo\n", s)
-		if out != "pm> " {
+		if out != "guardian> " {
 			t.Errorf("%q: out %q", cmd, out)
 		}
 		assertZeroed(t, s)
@@ -48,7 +48,7 @@ func TestShellExitCommandsStopAndZeroKey(t *testing.T) {
 func TestShellEOFZeroesKey(t *testing.T) {
 	s := newSession()
 	out := run("", s)
-	if !strings.HasPrefix(out, "pm> ") {
+	if !strings.HasPrefix(out, "guardian> ") {
 		t.Fatalf("out %q", out)
 	}
 	assertZeroed(t, s)
@@ -57,7 +57,7 @@ func TestShellEOFZeroesKey(t *testing.T) {
 func TestShellUnknownCommandContinues(t *testing.T) {
 	s := newSession()
 	out := run("foo\nexit\n", s)
-	if out != "pm> comando desconhecido\npm> " {
+	if out != "guardian> comando desconhecido\nguardian> " {
 		t.Fatalf("out %q", out)
 	}
 	assertZeroed(t, s)
@@ -90,7 +90,7 @@ func TestShellDispatchesRestOfLineAsArg(t *testing.T) {
 		if len(got) != 1 || got[0] != want {
 			t.Errorf("%q: args %q, want %q", line, got, want)
 		}
-		if out != "pm> ok\npm> " {
+		if out != "guardian> ok\nguardian> " {
 			t.Errorf("%q: out %q", line, out)
 		}
 		assertZeroed(t, s)
@@ -102,7 +102,7 @@ func TestShellUnknownCommandWithRoutesContinues(t *testing.T) {
 	calls := 0
 	cmds := map[string]SessionCommand{"list": func(context.Context, *Prompter, *Session, string) error { calls++; return nil }}
 	out := runCmds("foo\nexit list\nlist\nexit\n", s, cmds)
-	if out != "pm> comando desconhecido\npm> comando desconhecido\npm> pm> " || calls != 1 {
+	if out != "guardian> comando desconhecido\nguardian> comando desconhecido\nguardian> guardian> " || calls != 1 {
 		t.Fatalf("out %q calls %d", out, calls)
 	}
 	assertZeroed(t, s)
@@ -122,7 +122,7 @@ func TestShellCommandEOFStopsAndZeroesKey(t *testing.T) {
 			"list": func(context.Context, *Prompter, *Session, string) error { listed++; return nil },
 		}
 		out := runCmds("add\ngmail\nlist\n", s, cmds)
-		if out != "pm> nome: " || listed != 0 {
+		if out != "guardian> nome: " || listed != 0 {
 			t.Errorf("%v: out %q listed %d", ret, out, listed)
 		}
 		assertZeroed(t, s)
@@ -137,7 +137,7 @@ func TestShellCommandErrorContinues(t *testing.T) {
 		"list": func(context.Context, *Prompter, *Session, string) error { listed++; return nil },
 	}
 	out := runCmds("add\nlist\nexit\n", s, cmds)
-	if out != "pm> pm> pm> " || listed != 1 {
+	if out != "guardian> guardian> guardian> " || listed != 1 {
 		t.Fatalf("out %q listed %d", out, listed)
 	}
 	assertZeroed(t, s)
@@ -153,9 +153,24 @@ func TestShellSessionExpiredStopsAndZeroesKey(t *testing.T) {
 			return ret
 		}}
 		out := runCmds("list\nlist\nexit\n", s, cmds)
-		if out != "pm> sessão expirada, faça login novamente\n" || listed != 1 {
+		if out != "guardian> sessão expirada, faça login novamente\n" || listed != 1 {
 			t.Errorf("%v: out %q listed %d", ret, out, listed)
 		}
 		assertZeroed(t, s)
+	}
+}
+
+func TestShellReportsSessionToPrompter(t *testing.T) {
+	s := newSession()
+	var seen []*Session
+	p := &Prompter{In: bufio.NewReader(strings.NewReader("list\nexit\n")), Out: io.Discard, OnSession: func(x *Session) { seen = append(seen, x) }}
+	Shell(context.Background(), p, s, map[string]SessionCommand{"list": func(context.Context, *Prompter, *Session, string) error {
+		if len(seen) != 1 || seen[0] != s {
+			t.Errorf("session not reported before commands: %v", seen)
+		}
+		return nil
+	}})
+	if len(seen) != 2 || seen[1] != nil {
+		t.Fatalf("seen %v", seen)
 	}
 }

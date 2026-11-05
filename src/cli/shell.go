@@ -26,8 +26,12 @@ type SessionCommand func(ctx context.Context, p *Prompter, s *Session, arg strin
 
 func Shell(ctx context.Context, p *Prompter, s *Session, cmds map[string]SessionCommand) {
 	defer s.Close()
+	if p.OnSession != nil {
+		p.OnSession(s)
+		defer p.OnSession(nil)
+	}
 	for {
-		fmt.Fprint(p.Out, "pm> ")
+		fmt.Fprint(p.Out, "guardian> ")
 		line, err := p.In.ReadString('\n')
 		line = strings.TrimSpace(line)
 		name, arg, _ := strings.Cut(line, " ")

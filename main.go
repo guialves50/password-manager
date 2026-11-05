@@ -157,7 +157,7 @@ func serve(connect func() (*gorm.DB, error), stdout, stderr io.Writer) int {
 func serverSecret(stderr io.Writer) ([]byte, error) {
 	h := os.Getenv("PM_SERVER_SECRET")
 	if h == "" {
-		fmt.Fprintln(stderr, "aviso: PM_SERVER_SECRET não definido; respostas de pré-login para emails não cadastrados mudam a cada reinício")
+		fmt.Fprintln(stderr, "aviso: PM_SERVER_SECRET não definido; respostas de pré-login para emails não cadastrados mudam a cada reinício e contas com 2FA não conseguem logar após reiniciar (use recover)")
 		return keys.Random(32)
 	}
 	b, err := hex.DecodeString(h)

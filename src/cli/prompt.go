@@ -25,6 +25,21 @@ type Prompter struct {
 	ShowCheck func()
 	// Browse lets the user walk entries interactively; it returns when they close it.
 	Browse func(entries []Entry)
+	// Pick lets the user choose one entry; false when they cancel.
+	Pick func(entries []Entry) (int, bool)
+	// Show opens one entry's details; it returns when the user closes them.
+	Show func(entry Entry)
+	// Box draws the following prompts inside a box titled title. The returned
+	// func closes it: ok plays the confirmation check, otherwise the box dissolves.
+	Box func(title string) func(ok bool)
+}
+
+// OpenBox is Box, or a no-op outside the TUI.
+func (p *Prompter) OpenBox(title string) func(ok bool) {
+	if p.Box == nil {
+		return func(bool) {}
+	}
+	return p.Box(title)
 }
 
 type Field struct {

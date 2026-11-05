@@ -18,19 +18,20 @@ type GenerateFunc func(n int) (string, error)
 
 func NewAdd(add AddFunc, gen GenerateFunc) cli.SessionCommand {
 	return func(ctx context.Context, p *cli.Prompter, s *cli.Session, _ string) error {
+		done := p.OpenBox("novo item")
 		in, err := readItem(p, gen)
 		skipped := 0
 		if err == nil {
 			skipped, err = add(ctx, s, in)
 		}
 		if err != nil {
+			done(false)
 			fmt.Fprintln(p.Out, vaulterrors.Message(err))
 		} else {
 			fmt.Fprintln(p.Out, "item salvo")
+			done(true)
 		}
-		if skipped > 0 {
-			fmt.Fprintf(p.Out, "aviso: %d item(ns) ignorado(s) por falha de integridade\n", skipped)
-		}
+		warnSkipped(p, skipped)
 		return err
 	}
 }

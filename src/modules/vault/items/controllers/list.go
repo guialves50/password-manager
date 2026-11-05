@@ -28,9 +28,7 @@ func NewList(list ListFunc) cli.SessionCommand {
 				fmt.Fprintln(p.Out, it.Name)
 			}
 		}
-		if skipped > 0 {
-			fmt.Fprintf(p.Out, "aviso: %d item(ns) ignorado(s) por falha de integridade\n", skipped)
-		}
+		warnSkipped(p, skipped)
 		return nil
 	}
 }

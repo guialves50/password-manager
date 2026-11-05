@@ -27,6 +27,8 @@ const (
 	bar      = "\x1b[48;5;237m\x1b[38;5;252m"
 )
 
+var arrows = map[byte]string{'A': "up", 'B': "down", 'C': "right", 'D': "left"}
+
 var ansi = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
 
 type result struct {
@@ -52,6 +54,10 @@ type UI struct {
 	now      func() time.Time
 	art      []string
 	checkAt  time.Time
+
+	browser            *browser
+	boxAt, boxClosedAt time.Time
+	closedRows         int
 }
 
 const (
@@ -83,6 +89,7 @@ func (u *UI) Prompter() *cli.Prompter {
 			defer u.mu.Unlock()
 			u.art = lines
 		},
+		Browse: u.browse,
 		ShowCheck: func() {
 			u.mu.Lock()
 			defer u.mu.Unlock()
@@ -135,6 +142,14 @@ func (u *UI) Feed(b []byte) {
 	for _, c := range b {
 		u.key(c)
 	}
+	// ponytail: a lone ESC is told apart from an arrow key by arriving alone in
+	// one read; a sequence split across reads would close the box.
+	if u.esc == 1 {
+		u.esc = 0
+		if u.browser != nil {
+			u.browseKey("esc")
+		}
+	}
 }
 
 func (u *UI) key(c byte) {
@@ -145,10 +160,28 @@ func (u *UI) key(c byte) {
 	case u.esc == 2:
 		if c >= 0x40 && c <= 0x7e {
 			u.esc = 0
+			if k, ok := arrows[c]; ok && u.browser != nil {
+				u.browseKey(k)
+			}
+		}
+		return
+	case u.esc == 1 && u.browser != nil:
+		u.browseKey("esc")
+	}
+	u.esc = 0
+	if u.browser != nil {
+		switch c {
+		case 0x1b:
+			u.esc = 1
+		case '\r', '\n':
+			u.browseKey("enter")
+		case ' ':
+			u.browseKey("space")
+		case 3, 4:
+			u.browseKey("cancel")
 		}
 		return
 	}
-	u.esc = 0
 	if c != '?' {
 		u.help = false
 	}
@@ -277,6 +310,12 @@ func (u *UI) Render(w, h int) []string {
 	area := bottomRow - top
 	var middle []string
 	switch {
+	case u.browser != nil && u.now().Sub(u.boxAt) < boxMorph:
+		middle = morph(shieldRaster(u.angle, w, area), boxRaster(w, area, u.browser.rows()), float64(u.now().Sub(u.boxAt))/float64(boxMorph)).lines()
+	case u.browser != nil:
+		middle = u.browser.view(w, area)
+	case !u.boxClosedAt.IsZero() && u.now().Sub(u.boxClosedAt) < boxMorph:
+		middle = morph(boxRaster(w, area, u.closedRows), shieldRaster(u.angle, w, area), float64(u.now().Sub(u.boxClosedAt))/float64(boxMorph)).lines()
 	case u.help:
 		middle = []string{"atalhos", "", "enter    envia", "ctrl+c   cancela o prompt atual (na tela inicial, sai)", "ctrl+l   limpa a tela", "ctrl+u   apaga a linha", "?        mostra ou esconde esta ajuda"}
 		for i := range middle {

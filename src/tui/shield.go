@@ -161,10 +161,20 @@ func newRaster(w, h int) raster {
 }
 
 func (r raster) lines() []string {
-	pw := r.w * 2
+	cells := r.cells()
 	out := make([]string, r.h)
+	for row := range cells {
+		out[row] = strings.Join(cells[row], "")
+	}
+	return out
+}
+
+// cells renders each terminal cell on its own, so text can be laid over it.
+func (r raster) cells() [][]string {
+	pw := r.w * 2
+	out := make([][]string, r.h)
 	for row := range r.h {
-		var b strings.Builder
+		out[row] = make([]string, r.w)
 		for col := range r.w {
 			var bits rune
 			for dy := range 4 {
@@ -174,13 +184,11 @@ func (r raster) lines() []string {
 					}
 				}
 			}
-			if bits == 0 {
-				b.WriteByte(' ')
-				continue
+			out[row][col] = " "
+			if bits != 0 {
+				out[row][col] = fmt.Sprintf("\x1b[38;5;%dm%c\x1b[0m", r.color[row*r.w+col], 0x2800+bits)
 			}
-			fmt.Fprintf(&b, "\x1b[38;5;%dm%c\x1b[0m", r.color[row*r.w+col], 0x2800+bits)
 		}
-		out[row] = b.String()
 	}
 	return out
 }

@@ -65,3 +65,21 @@ func TestListOrdersByLowercaseBytes(t *testing.T) {
 		t.Fatalf("names %q, want %q", names, want)
 	}
 }
+
+func TestItemsSortedWithAllFields(t *testing.T) {
+	s := session(t)
+	repo := &fakeRepo{rows: []dto.StoredItem{
+		row(t, s, "id-1", dto.Item{Name: "github", Username: "ana", Password: "p1", URL: "https://github.com", Notes: "n"}),
+		row(t, s, "id-2", dto.Item{Name: "Amazon", Password: "p2"}),
+	}}
+	items, skipped, err := (&ListService{Repo: repo}).Items(context.Background(), s)
+	if err != nil || skipped != 0 || len(items) != 2 {
+		t.Fatalf("%+v %d %v", items, skipped, err)
+	}
+	if items[0].Name != "Amazon" || items[0].Password != "p2" {
+		t.Fatalf("first %+v", items[0])
+	}
+	if it := items[1]; it.Name != "github" || it.Username != "ana" || it.Password != "p1" || it.URL != "https://github.com" || it.Notes != "n" {
+		t.Fatalf("second %+v", it)
+	}
+}

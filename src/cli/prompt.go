@@ -23,6 +23,18 @@ type Prompter struct {
 	ShowArt func(lines []string)
 	// ShowCheck plays the confirmation check animation.
 	ShowCheck func()
+	// Browse lets the user walk entries interactively; it returns when they close it.
+	Browse func(entries []Entry)
+}
+
+type Field struct {
+	Label, Value string
+	Secret       bool
+}
+
+type Entry struct {
+	Title  string
+	Fields []Field
 }
 
 func NewTerminalPrompter() *Prompter {

@@ -103,6 +103,7 @@ func morph(src, dst raster, t float64) raster {
 	n := max(len(a), len(b))
 	out := newRaster(dst.w, dst.h)
 	arrived, total := make([]int, len(out.color)), make([]int, len(out.color))
+	from := make([]int, len(out.color))
 	for k := range n {
 		pa, pb := a[k*len(a)/n], b[k*len(b)/n]
 		p := min(1, max(0, (t-0.35*float64(k)/float64(n))/0.65))
@@ -115,9 +116,10 @@ func morph(src, dst raster, t float64) raster {
 		if p >= 0.5 {
 			arrived[cell]++
 		}
+		from[cell] = src.color[(int(pa[1])/4)*src.w+int(pa[0])/2]
 	}
 	for i := range out.color {
-		out.color[i] = green
+		out.color[i] = from[i]
 		if 2*arrived[i] >= total[i] && dst.color[i] != 0 {
 			out.color[i] = dst.color[i]
 		}

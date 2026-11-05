@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -21,6 +22,7 @@ var testParams = keys.Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}
 type fakeAPI struct {
 	salt, blob, authHash []byte
 	preErr, loginErr     error
+	code                 string
 	prelogins            []string
 	logins               []dto.Request
 	raw                  [][]byte
@@ -44,6 +46,12 @@ func (f *fakeAPI) Login(_ context.Context, req dto.Request) (dto.Response, error
 	}
 	if !bytes.Equal(req.AuthHash, f.authHash) {
 		return dto.Response{}, autherrors.ErrInvalidCredentials
+	}
+	if f.code != "" && req.Code == "" {
+		return dto.Response{}, autherrors.ErrTOTPRequired
+	}
+	if req.Code != f.code {
+		return dto.Response{}, autherrors.ErrInvalidTOTP
 	}
 	return dto.Response{Token: "tok", UserID: 42, MasterBlob: f.blob}, nil
 }
@@ -147,5 +155,53 @@ func TestLoginBlobBoundToEmail(t *testing.T) {
 	s, err := (&Service{API: api}).Login(context.Background(), dto.Input{Email: "bob@example.com", Password: []byte("SenhaForte1")})
 	if s != nil || err == nil || autherrors.Message(err) != "erro interno" {
 		t.Fatalf("got %v, %v", s, err)
+	}
+}
+
+func codeFunc(code string, err error, calls *int) func() (string, error) {
+	return func() (string, error) {
+		*calls++
+		return code, err
+	}
+}
+
+func TestLogin2FAAsksCodeAndResends(t *testing.T) {
+	api, vk, _ := seed(t, "alice@example.com", "SenhaForte1")
+	api.code = "123456"
+	calls := 0
+	s, err := (&Service{API: api}).Login(context.Background(), dto.Input{Email: "alice@example.com", Password: []byte("SenhaForte1"), Code: codeFunc("123456", nil, &calls)})
+	if err != nil || !bytes.Equal(s.VaultKey, vk) || s.Token != "tok" {
+		t.Fatalf("%+v %v", s, err)
+	}
+	if calls != 1 || len(api.logins) != 2 || api.logins[0].Code != "" || api.logins[1].Code != "123456" || !bytes.Equal(api.logins[1].AuthHash, api.authHash) {
+		t.Fatalf("calls=%d logins=%+v", calls, api.logins)
+	}
+}
+
+func TestLogin2FAWrongCode(t *testing.T) {
+	api, _, _ := seed(t, "alice@example.com", "SenhaForte1")
+	api.code = "123456"
+	calls := 0
+	_, err := (&Service{API: api}).Login(context.Background(), dto.Input{Email: "alice@example.com", Password: []byte("SenhaForte1"), Code: codeFunc("000000", nil, &calls)})
+	if !errors.Is(err, autherrors.ErrInvalidTOTP) || calls != 1 || len(api.logins) != 2 {
+		t.Fatalf("err=%v calls=%d logins=%d", err, calls, len(api.logins))
+	}
+}
+
+func TestLogin2FACodePromptCancelled(t *testing.T) {
+	api, _, _ := seed(t, "alice@example.com", "SenhaForte1")
+	api.code = "123456"
+	calls := 0
+	_, err := (&Service{API: api}).Login(context.Background(), dto.Input{Email: "alice@example.com", Password: []byte("SenhaForte1"), Code: codeFunc("", io.EOF, &calls)})
+	if !errors.Is(err, io.EOF) || len(api.logins) != 1 {
+		t.Fatalf("err=%v logins=%d", err, len(api.logins))
+	}
+}
+
+func TestLoginWithout2FADoesNotAskCode(t *testing.T) {
+	api, _, _ := seed(t, "alice@example.com", "SenhaForte1")
+	calls := 0
+	if _, err := (&Service{API: api}).Login(context.Background(), dto.Input{Email: "alice@example.com", Password: []byte("SenhaForte1"), Code: codeFunc("1", nil, &calls)}); err != nil || calls != 0 {
+		t.Fatalf("err=%v calls=%d", err, calls)
 	}
 }

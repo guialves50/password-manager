@@ -114,6 +114,7 @@ func TestLoginErrors(t *testing.T) {
 	}{
 		{"invalid", "a@example.com\n", []string{"SenhaErrada1"}, autherrors.ErrInvalidCredentials, "email ou senha mestra inválidos\n"},
 		{"locked", "a@example.com\n", []string{"SenhaErrada1"}, &autherrors.LockedError{Minutes: 15}, "conta bloqueada, tente novamente em 15 minutos\n"},
+		{"invalid totp", "a@example.com\n", []string{"SenhaForte1"}, autherrors.ErrInvalidTOTP, "código 2FA inválido\n"},
 		{"internal", "a@example.com\n", []string{"SenhaErrada1"}, errors.New("db SenhaErrada1"), "erro interno\n"},
 		{"eof email", "", nil, nil, "operação cancelada\n"},
 		{"eof password", "a@example.com\n", nil, nil, "operação cancelada\n"},
@@ -173,5 +174,21 @@ func TestLoginLogsOutWhenShellEnds(t *testing.T) {
 		if !bytes.Equal(s.VaultKey, make([]byte, 32)) {
 			t.Errorf("%s: key not zeroed", c.name)
 		}
+	}
+}
+
+func TestLoginAsksTOTPCodeOnDemand(t *testing.T) {
+	var code string
+	var codeErr error
+	login := func(_ context.Context, in dto.Input) (*cli.Session, error) {
+		code, codeErr = in.Code()
+		return &cli.Session{Token: "tok"}, nil
+	}
+	p, out := prompter("a@example.com\n123456\nexit\n", "SenhaForte1")
+	if err := New(login, (&logoutSpy{}).logout, nil)(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	if code != "123456" || codeErr != nil || !strings.HasPrefix(out.String(), "email: senha mestra: \ncódigo 2FA: guardian> ") {
+		t.Fatalf("code %q err %v out %q", code, codeErr, out.String())
 	}
 }

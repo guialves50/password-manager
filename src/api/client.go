@@ -97,6 +97,14 @@ func decodeError(res *http.Response) error {
 			return autherrors.ErrInvalidRecovery
 		case "unauthorized":
 			return autherrors.ErrSessionExpired
+		case "totp_required":
+			return autherrors.ErrTOTPRequired
+		case "invalid_totp":
+			return autherrors.ErrInvalidTOTP
+		case "totp_enabled":
+			return autherrors.ErrTOTPEnabled
+		case "no_pending":
+			return autherrors.ErrNoPendingTOTP
 		case "not_found":
 			return vaulterrors.ErrNotFound
 		case "locked":

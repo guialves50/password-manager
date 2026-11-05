@@ -51,7 +51,7 @@ func TestSessionExpiresMidShell(t *testing.T) {
 		return afterLogin.Read(b)
 	})))
 	code := start([]string{"login"}, p, io.Discard)
-	want := "email: senha mestra: \npm> sessão expirada, faça login novamente\n"
+	want := "email: senha mestra: \nguardian> sessão expirada, faça login novamente\n"
 	if code != 0 || out.String() != want {
 		t.Fatalf("code %d out %q", code, out.String())
 	}

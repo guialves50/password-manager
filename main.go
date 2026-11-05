@@ -23,6 +23,7 @@ import (
 	login "github.com/guialves50/password-manager/src/modules/auth/login/router"
 	recover "github.com/guialves50/password-manager/src/modules/auth/recover/router"
 	register "github.com/guialves50/password-manager/src/modules/auth/register/router"
+	twofactor "github.com/guialves50/password-manager/src/modules/auth/twofactor/router"
 	items "github.com/guialves50/password-manager/src/modules/vault/items/router"
 	"github.com/guialves50/password-manager/src/server"
 	"github.com/guialves50/password-manager/src/tui"
@@ -74,7 +75,9 @@ func clientRoutes() (map[string]cli.Command, error) {
 		return nil, err
 	}
 	routes := register.Routes(c)
-	maps.Copy(routes, login.Routes(c, items.Routes(c)))
+	cmds := items.Routes(c)
+	maps.Copy(cmds, twofactor.Routes(c))
+	maps.Copy(routes, login.Routes(c, cmds))
 	maps.Copy(routes, recover.Routes(c))
 	return routes, nil
 }
@@ -154,7 +157,7 @@ func serve(connect func() (*gorm.DB, error), stdout, stderr io.Writer) int {
 func serverSecret(stderr io.Writer) ([]byte, error) {
 	h := os.Getenv("PM_SERVER_SECRET")
 	if h == "" {
-		fmt.Fprintln(stderr, "aviso: PM_SERVER_SECRET não definido; respostas de pré-login para emails não cadastrados mudam a cada reinício")
+		fmt.Fprintln(stderr, "aviso: PM_SERVER_SECRET não definido; respostas de pré-login para emails não cadastrados mudam a cada reinício e contas com 2FA não conseguem logar após reiniciar (use recover)")
 		return keys.Random(32)
 	}
 	b, err := hex.DecodeString(h)

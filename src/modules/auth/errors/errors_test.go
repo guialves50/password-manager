@@ -20,6 +20,10 @@ func TestMessages(t *testing.T) {
 		ErrSessionExpired:         "sessão expirada, faça login novamente",
 		ErrInsecureServer:         "use https para servidores fora do localhost",
 		ErrBusy:                   "servidor ocupado, tente novamente em instantes",
+		ErrTOTPRequired:           "código 2FA necessário",
+		ErrInvalidTOTP:            "código 2FA inválido",
+		ErrTOTPEnabled:            "2FA já está ativo",
+		ErrNoPendingTOTP:          "rode 2fa novamente",
 		&LockedError{Minutes: 15}: "conta bloqueada, tente novamente em 15 minutos",
 		&LockedError{Minutes: 1}:  "conta bloqueada, tente novamente em 1 minutos",
 	}
@@ -40,6 +44,9 @@ func TestMessage(t *testing.T) {
 		fmt.Errorf("x: %w", ErrUnreachable):     "não foi possível conectar ao servidor",
 		fmt.Errorf("x: %w", ErrSessionExpired):  "sessão expirada, faça login novamente",
 		ErrInsecureServer:                       "use https para servidores fora do localhost",
+		fmt.Errorf("x: %w", ErrInvalidTOTP):     "código 2FA inválido",
+		ErrTOTPEnabled:                          "2FA já está ativo",
+		ErrNoPendingTOTP:                        "rode 2fa novamente",
 		&LockedError{Minutes: 3}:                "conta bloqueada, tente novamente em 3 minutos",
 		errors.New("pq: SenhaForte1"):           "erro interno",
 	}

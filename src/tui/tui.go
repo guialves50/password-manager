@@ -50,9 +50,15 @@ type UI struct {
 	leftover []byte
 	clearAt  time.Time
 	now      func() time.Time
+	art      []string
+	checkAt  time.Time
 }
 
-const idleClear = 5 * time.Second
+const (
+	idleClear = 5 * time.Second
+	checkDraw = time.Second
+	checkShow = 3 * time.Second
+)
 
 func New(server string) *UI {
 	return &UI{server: server, now: time.Now}
@@ -66,10 +72,20 @@ func (u *UI) Prompter() *cli.Prompter {
 		OnSession: func(s *cli.Session) {
 			u.mu.Lock()
 			defer u.mu.Unlock()
-			u.email, u.log = "", nil
+			u.email, u.log, u.art, u.checkAt = "", nil, nil, time.Time{}
 			if s != nil {
 				u.email = s.Email
 			}
+		},
+		ShowArt: func(lines []string) {
+			u.mu.Lock()
+			defer u.mu.Unlock()
+			u.art = lines
+		},
+		ShowCheck: func() {
+			u.mu.Lock()
+			defer u.mu.Unlock()
+			u.art, u.log, u.checkAt = nil, nil, u.now()
 		},
 	}
 }
@@ -247,13 +263,16 @@ func (u *UI) Render(w, h int) []string {
 	if u.email != "" {
 		who = u.email
 		desc = "Cofre aberto. A sessão expira após 30 min sem uso."
-		hint, status = "add, list, get <nome>, delete <nome> ou exit", "cofre aberto"
+		hint, status = "add, list, get <nome>, delete <nome>, 2fa ou exit", "cofre aberto"
 	}
 	screen[1] = "  " + dim + ">_ " + reset + bold + "Guardian" + reset + dim + " (" + Version + ")" + reset
 	screen[2] = "     " + dim + u.server + " · " + reset + who
 	screen[4] = "  " + dim + desc + reset
 
 	top, bottomRow := 6, h-4
+	if n := len(u.art); n > bottomRow-top && n <= bottomRow-1 {
+		top = 1 // a QR code needs the header rows more than the header does
+	}
 	area := bottomRow - top
 	var middle []string
 	switch {
@@ -262,6 +281,10 @@ func (u *UI) Render(w, h int) []string {
 		for i := range middle {
 			middle[i] = "  " + middle[i]
 		}
+	case u.art != nil:
+		middle = centered(u.art, w, area)
+	case !u.checkAt.IsZero() && u.now().Sub(u.checkAt) < checkShow:
+		middle = check(min(1, float64(u.now().Sub(u.checkAt))/float64(checkDraw)), w, area)
 	case len(u.log) > 0:
 		middle = wrap(u.log, w-4)
 		middle = middle[max(0, len(middle)-area):]
@@ -296,6 +319,21 @@ func (u *UI) Render(w, h int) []string {
 		screen[i] = fit(screen[i], w) + reset
 	}
 	return screen
+}
+
+func centered(art []string, w, h int) []string {
+	width := 0
+	for _, l := range art {
+		width = max(width, visible(l))
+	}
+	if len(art) > h || width > w {
+		return []string{"", "  aumente o terminal para ver o QR Code", "", "  " + art[len(art)-1]}
+	}
+	out := make([]string, len(art))
+	for i, l := range art {
+		out[i] = strings.Repeat(" ", (w-width)/2) + l
+	}
+	return out
 }
 
 func Run(server string, app func(p *cli.Prompter)) error {

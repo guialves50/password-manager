@@ -177,3 +177,99 @@ func TestAuthHashColumnsNotNull(t *testing.T) {
 		}
 	}
 }
+
+func TestFindByID(t *testing.T) {
+	db := database.TestTx(t)
+	repo := user.NewRepository(db)
+	u := seed(t, db, "byid@example.com")
+	got, err := repo.FindByID(context.Background(), u.ID)
+	if err != nil || got == nil || got.Email != "byid@example.com" {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	if got, err := repo.FindByID(context.Background(), u.ID+1000); got != nil || err != nil {
+		t.Fatalf("missing: %+v, %v", got, err)
+	}
+}
+
+func TestTOTPPendingThenActivate(t *testing.T) {
+	db := database.TestTx(t)
+	repo := user.NewRepository(db)
+	ctx := context.Background()
+	u := seed(t, db, "activate@example.com")
+
+	if ok, err := repo.ActivateTOTP(ctx, u.ID, 5); err != nil || ok {
+		t.Fatalf("activate without pending: %v %v", ok, err)
+	}
+	if ok, err := repo.SetTOTPPending(ctx, u.ID, []byte("p1")); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if ok, err := repo.SetTOTPPending(ctx, u.ID, []byte("p2")); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if got := reload(t, db, u.ID); got.TOTPSecret != nil || !bytes.Equal(got.TOTPPending, []byte("p2")) {
+		t.Fatalf("pending: %+v", got)
+	}
+	repo.TOTPAttempt(ctx, u.ID, time.Now())
+	if ok, err := repo.ActivateTOTP(ctx, u.ID, 5); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	got := reload(t, db, u.ID)
+	if !bytes.Equal(got.TOTPSecret, []byte("p2")) || got.TOTPPending != nil || got.TOTPLastCounter != 5 || got.TOTPFailures != 0 {
+		t.Fatalf("active: %+v", got)
+	}
+	if ok, err := repo.SetTOTPPending(ctx, u.ID, []byte("p3")); err != nil || ok {
+		t.Fatalf("pending while active: %v %v", ok, err)
+	}
+}
+
+func TestTOTPAttemptLocksOnThirdForTenMinutes(t *testing.T) {
+	db := database.TestTx(t)
+	repo := user.NewRepository(db)
+	ctx := context.Background()
+	u := seed(t, db, "totplock@example.com")
+	now := time.Now()
+
+	for i := 1; i <= 3; i++ {
+		if ok, err := repo.TOTPAttempt(ctx, u.ID, now); err != nil || !ok {
+			t.Fatal(i, ok, err)
+		}
+	}
+	got := reload(t, db, u.ID)
+	if got.TOTPFailures != 3 || got.TOTPLockedUntil == nil || got.TOTPLockedUntil.Sub(now.Add(10*time.Minute)).Abs() > time.Second {
+		t.Fatalf("after 3: %d %v", got.TOTPFailures, got.TOTPLockedUntil)
+	}
+	if got.FailedAttempts != 0 {
+		t.Fatalf("password counter touched: %d", got.FailedAttempts)
+	}
+	if ok, err := repo.TOTPAttempt(ctx, u.ID, now.Add(9*time.Minute)); err != nil || ok {
+		t.Fatalf("4th while locked: %v %v", ok, err)
+	}
+	if ok, err := repo.TOTPAttempt(ctx, u.ID, now.Add(10*time.Minute)); err != nil || !ok {
+		t.Fatalf("after expiry: %v %v", ok, err)
+	}
+	if got := reload(t, db, u.ID); got.TOTPFailures != 1 || got.TOTPLockedUntil != nil {
+		t.Fatalf("restart: %d %v", got.TOTPFailures, got.TOTPLockedUntil)
+	}
+}
+
+func TestTOTPAcceptRejectsReplayAndResets(t *testing.T) {
+	db := database.TestTx(t)
+	repo := user.NewRepository(db)
+	ctx := context.Background()
+	u := seed(t, db, "accept@example.com")
+
+	repo.TOTPAttempt(ctx, u.ID, time.Now())
+	repo.TOTPAttempt(ctx, u.ID, time.Now())
+	if ok, err := repo.TOTPAccept(ctx, u.ID, 10); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	got := reload(t, db, u.ID)
+	if got.TOTPLastCounter != 10 || got.TOTPFailures != 0 || got.TOTPLockedUntil != nil {
+		t.Fatalf("accept: %+v", got)
+	}
+	for _, c := range []int64{10, 9} {
+		if ok, err := repo.TOTPAccept(ctx, u.ID, c); err != nil || ok {
+			t.Fatalf("replay %d: %v %v", c, ok, err)
+		}
+	}
+}

@@ -118,3 +118,26 @@ func TestRotateAuthRejectsStaleHash(t *testing.T) {
 		t.Fatalf("missing user: %v", err)
 	}
 }
+
+func TestRotateAuthDisables2FA(t *testing.T) {
+	db := database.TestTx(t)
+	ctx := context.Background()
+	u := seedAuthUser(t, db, "rotate-2fa@example.com")
+	until := time.Now().Add(5 * time.Minute)
+	if err := db.Model(u).Updates(map[string]any{
+		"totp_secret": []byte("s"), "totp_pending": []byte("p"), "totp_last_counter": 99,
+		"totp_failures": 3, "totp_locked_until": until,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.New(db).RotateAuth(ctx, u.ID, []byte("rah"), next("2")); err != nil {
+		t.Fatal(err)
+	}
+	var got user.User
+	if err := db.First(&got, u.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got.TOTPSecret != nil || got.TOTPPending != nil || got.TOTPLastCounter != 0 || got.TOTPFailures != 0 || got.TOTPLockedUntil != nil {
+		t.Fatalf("2fa not cleared: %+v", got)
+	}
+}

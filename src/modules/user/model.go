@@ -5,6 +5,8 @@ import "time"
 const (
 	MaxFailedAttempts = 5
 	LockDuration      = 15 * time.Minute
+	MaxTOTPFailures   = 3
+	TOTPLockDuration  = 10 * time.Minute
 )
 
 type User struct {
@@ -23,6 +25,11 @@ type User struct {
 	RecoveryAuthHash   []byte `gorm:"not null"`
 	FailedAttempts     int    `gorm:"not null;default:0"`
 	LockedUntil        *time.Time
+	TOTPSecret         []byte     `gorm:"column:totp_secret"`
+	TOTPPending        []byte     `gorm:"column:totp_pending"`
+	TOTPLastCounter    int64      `gorm:"column:totp_last_counter;not null;default:0"`
+	TOTPFailures       int        `gorm:"column:totp_failures;not null;default:0"`
+	TOTPLockedUntil    *time.Time `gorm:"column:totp_locked_until"`
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 }

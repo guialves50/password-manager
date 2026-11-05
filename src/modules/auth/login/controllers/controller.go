@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/guialves50/password-manager/src/cli"
 	autherrors "github.com/guialves50/password-manager/src/modules/auth/errors"
@@ -37,5 +38,9 @@ func run(ctx context.Context, p *cli.Prompter, login LoginFunc) (*cli.Session, e
 		keys.Zero(pw)
 		return nil, err
 	}
-	return login(ctx, dto.Input{Email: email, Password: pw})
+	code := func() (string, error) {
+		c, err := p.Line("código 2FA: ")
+		return strings.TrimSpace(c), err
+	}
+	return login(ctx, dto.Input{Email: email, Password: pw, Code: code})
 }

@@ -41,7 +41,14 @@ func (s *Service) Login(ctx context.Context, in dto.Input) (*cli.Session, error)
 	defer keys.Zero(authHash)
 	defer keys.Zero(encKey)
 
-	res, err := s.API.Login(ctx, dto.Request{Email: email, AuthHash: authHash})
+	req := dto.Request{Email: email, AuthHash: authHash}
+	res, err := s.API.Login(ctx, req)
+	if errors.Is(err, autherrors.ErrTOTPRequired) && in.Code != nil {
+		if req.Code, err = in.Code(); err != nil {
+			return nil, err
+		}
+		res, err = s.API.Login(ctx, req)
+	}
 	if err != nil {
 		return nil, err
 	}

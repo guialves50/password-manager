@@ -3,11 +3,13 @@ package dto
 type Input struct {
 	Email    string
 	Password []byte
+	Code     func() (string, error)
 }
 
 type Request struct {
 	Email    string `json:"email"`
 	AuthHash []byte `json:"auth_hash"`
+	Code     string `json:"code,omitempty"`
 }
 
 type Response struct {

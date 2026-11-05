@@ -31,6 +31,11 @@ func (r *Repository) RotateAuth(ctx context.Context, id uint64, verifiedRecovery
 			"recovery_auth_hash":   next.RecoveryAuthHash,
 			"failed_attempts":      0,
 			"locked_until":         nil,
+			"totp_secret":          nil,
+			"totp_pending":         nil,
+			"totp_last_counter":    0,
+			"totp_failures":        0,
+			"totp_locked_until":    nil,
 		})
 		if res.Error != nil {
 			return res.Error

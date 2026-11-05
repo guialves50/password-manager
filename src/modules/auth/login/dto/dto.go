@@ -8,6 +8,7 @@ type Input struct {
 type Request struct {
 	Email    string `json:"email"`
 	AuthHash []byte `json:"auth_hash"`
+	Code     string `json:"code,omitempty"`
 }
 
 type Response struct {

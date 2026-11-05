@@ -51,7 +51,7 @@ func New(db *gorm.DB, cfg Config) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("POST /prelogin", prelogin.New(users, cfg.Secret))
 	mux.Handle("POST /register", kdf(register.New(registerrepo.New(db), cfg.AuthParams)))
-	mux.Handle("POST /login", kdf(login.NewLogin(users, sessions, cfg.AuthParams, now)))
+	mux.Handle("POST /login", kdf(login.NewLogin(users, sessions, check, cfg.AuthParams, now)))
 	mux.Handle("POST /logout", auth(login.NewLogout(sessions)))
 	mux.Handle("POST /recover/start", kdf(recovery.NewStart(users, cfg.AuthParams, now)))
 	mux.Handle("POST /recover/finish", kdf(recovery.NewFinish(users, recoverrepo.New(db), cfg.AuthParams, now)))

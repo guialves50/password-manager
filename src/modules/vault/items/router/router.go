@@ -12,7 +12,7 @@ func Routes(c *api.Client) map[string]cli.SessionCommand {
 	get := &services.GetService{Repo: c}
 	return map[string]cli.SessionCommand{
 		"add":    controllers.NewAdd((&services.AddService{Repo: c}).Add, generator.Generate),
-		"list":   controllers.NewList((&services.ListService{Repo: c}).List),
+		"list":   controllers.NewList((&services.ListService{Repo: c}).Items),
 		"get":    controllers.NewGet(get.Get),
 		"delete": controllers.NewDelete(get.Get, (&services.DeleteService{Repo: c}).Delete),
 	}

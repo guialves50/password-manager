@@ -17,10 +17,13 @@ type LogoutFunc func(ctx context.Context, token string) error
 
 func New(login LoginFunc, logout LogoutFunc, cmds map[string]cli.SessionCommand) cli.Command {
 	return func(ctx context.Context, p *cli.Prompter) error {
-		s, err := run(ctx, p, login)
+		s, usedCode, err := run(ctx, p, login)
 		if err != nil {
 			fmt.Fprintln(p.Out, autherrors.Message(err))
 			return err
+		}
+		if usedCode && p.ShowCheck != nil {
+			p.ShowCheck()
 		}
 		cli.Shell(ctx, p, s, cmds)
 		logout(ctx, s.Token)
@@ -28,19 +31,22 @@ func New(login LoginFunc, logout LogoutFunc, cmds map[string]cli.SessionCommand)
 	}
 }
 
-func run(ctx context.Context, p *cli.Prompter, login LoginFunc) (*cli.Session, error) {
+func run(ctx context.Context, p *cli.Prompter, login LoginFunc) (*cli.Session, bool, error) {
 	email, err := p.Line("email: ")
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	pw, err := p.Secret("senha mestra: ")
 	if err != nil {
 		keys.Zero(pw)
-		return nil, err
+		return nil, false, err
 	}
+	usedCode := false
 	code := func() (string, error) {
+		usedCode = true
 		c, err := p.Line("código 2FA: ")
 		return strings.TrimSpace(c), err
 	}
-	return login(ctx, dto.Input{Email: email, Password: pw, Code: code})
+	s, err := login(ctx, dto.Input{Email: email, Password: pw, Code: code})
+	return s, usedCode, err
 }

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"math"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -352,33 +353,58 @@ func TestCheckFormsThenShieldReturns(t *testing.T) {
 	u.Write([]byte("código 2FA: 123456\n2FA ativado\n"))
 	p.ShowArt([]string{"qr"})
 	p.ShowCheck()
+	start := c.t
+	at := func(d time.Duration) string {
+		c.t = start.Add(d)
+		return center(u.Render(100, 30))
+	}
 
-	at := func(d time.Duration) (string, string) {
-		c.t = c.t.Add(d)
-		raw := u.Render(100, 30)
-		return center(raw), center(plain(raw))
+	early, mid, drawn := at(100*time.Millisecond), at(400*time.Millisecond), at(drawEnd)
+	if !(dots(early) < dots(mid) && dots(mid) < dots(drawn)) {
+		t.Fatalf("not drawing: %d %d %d", dots(early), dots(mid), dots(drawn))
 	}
-	rawStart, _ := at(100 * time.Millisecond)
-	rawHalf, half := at(400 * time.Millisecond)
-	rawFull, full := at(500 * time.Millisecond)
-	_, held := at(1900 * time.Millisecond)
-	if !strings.Contains(rawHalf, checkColor) || !strings.Contains(rawFull, checkColor) {
-		t.Fatal("check not drawn")
+	if strings.Contains(plain([]string{drawn})[0], "2FA ativado") || strings.Contains(drawn, "qr") {
+		t.Fatal("log or QR drawn under the check")
 	}
-	if !(dots(rawStart) < dots(half) && dots(half) < dots(full)) {
-		t.Fatalf("not forming: %d %d %d", dots(rawStart), dots(half), dots(full))
+	held := at(1500 * time.Millisecond)
+	if !strings.Contains(held, checkColor) || dots(at(2000*time.Millisecond)) != dots(held) {
+		t.Fatal("check not held still before the morph")
 	}
-	if dots(held) != dots(full) || strings.Contains(full, "2FA ativado") || strings.Contains(full, "qr") {
-		t.Fatalf("held %d full %d %q", dots(held), dots(full), full)
+	if lo, hi := columns(strings.Split(at(900*time.Millisecond), "\n")); hi-lo <= spanOf(held) {
+		t.Fatalf("no pop/ring: span %d vs held %d", hi-lo, spanOf(held))
 	}
-	rawAfter, _ := at(100 * time.Millisecond)
-	if strings.Contains(rawAfter, checkColor) || dots(rawAfter) == 0 {
+	if lo, hi := columns(strings.Split(at(1250*time.Millisecond), "\n")); hi-lo <= spanOf(held)+3 {
+		t.Fatalf("no ring after the pop: span %d vs held %d", hi-lo, spanOf(held))
+	}
+	morphing := at(2600 * time.Millisecond)
+	if !strings.Contains(morphing, checkColor) || !regexp.MustCompile(`38;5;(2[3-5]\d|67|73|79)m`).MatchString(morphing) {
+		t.Fatal("morph frame does not mix check and shield dots")
+	}
+	if after := at(checkShow); strings.Contains(after, checkColor) || dots(after) == 0 {
 		t.Fatal("shield did not return after 3s")
 	}
 }
 
+func spanOf(s string) int {
+	lo, hi := columns(strings.Split(s, "\n"))
+	return hi - lo
+}
+
+func TestMorphEndsExactlyAsShield(t *testing.T) {
+	for _, angle := range []float64{0, 1.3} {
+		got := strings.Join(confirmation(checkShow, angle, 80, 20), "\n")
+		if want := strings.Join(shield(angle, 80, 20), "\n"); got != want {
+			t.Fatalf("angle %v: last frame differs from the shield", angle)
+		}
+	}
+	before := strings.Join(confirmation(morphStart, 0, 80, 20), "\n")
+	if want := strings.Join(confirmation(morphStart-time.Millisecond, 0, 80, 20), "\n"); before != want {
+		t.Fatal("morph jumps at its first frame")
+	}
+}
+
 func TestCheckIsCentered(t *testing.T) {
-	lo, hi := columns(check(1, 80, 20))
+	lo, hi := columns(checkRaster(1, 1, 80, 20).lines())
 	if hi < 0 || (lo+hi)/2 < 30 || (lo+hi)/2 > 50 {
 		t.Fatalf("check columns %d..%d", lo, hi)
 	}
@@ -405,5 +431,22 @@ func TestTallQRUsesHeaderRows(t *testing.T) {
 	screen := plain(u.Render(100, 30))
 	if !strings.Contains(screen[1], "▀") || !strings.Contains(screen[25], "chave: ABCD") || strings.Contains(strings.Join(screen, ""), "aumente o terminal") {
 		t.Fatalf("screen %q", screen)
+	}
+}
+
+func TestCheckSurvivesVaultOpeningButNotLogout(t *testing.T) {
+	c := &clock{t: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	u := New("x")
+	u.now = c.now
+	p := u.Prompter()
+	p.ShowCheck()
+	p.OnSession(&cli.Session{Email: "a@b.com"})
+	c.t = c.t.Add(time.Second)
+	if raw := center(u.Render(100, 30)); !strings.Contains(raw, checkColor) || u.email != "a@b.com" {
+		t.Fatal("check cleared when the vault opened")
+	}
+	p.OnSession(nil)
+	if raw := center(u.Render(100, 30)); strings.Contains(raw, checkColor) {
+		t.Fatal("check kept after logout")
 	}
 }

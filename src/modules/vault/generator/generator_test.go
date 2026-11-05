@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"io"
+	"math"
 	"strings"
 	"testing"
 
@@ -95,9 +96,25 @@ func TestGenerateUsesCryptoRand(t *testing.T) {
 	}
 }
 
+func coverProb(sizes []int, n int) float64 {
+	p := 0.0
+	for mask := 0; mask < 1<<len(sizes); mask++ {
+		left, sign := 86, 1.0
+		for k, size := range sizes {
+			if mask&(1<<k) != 0 {
+				left -= size
+				sign = -sign
+			}
+		}
+		p += sign * math.Pow(float64(left)/86, float64(n))
+	}
+	return p
+}
+
 func TestGenerateUniformPerPosition(t *testing.T) {
-	const samples, n = 20000, 20
+	const samples, n = 50000, 8
 	classes := []string{upper, lower, digits, symbols}
+	sizes := []int{26, 26, 10, 24}
 	counts := make([][4]int, n)
 	for range samples {
 		pw, _ := Generate(n)
@@ -109,11 +126,14 @@ func TestGenerateUniformPerPosition(t *testing.T) {
 			}
 		}
 	}
-	for i := range n {
-		for k, class := range classes {
-			want := float64(samples) * float64(len(class)) / 86
-			if got := float64(counts[i][k]); got < want*0.85 || got > want*1.15 {
-				t.Errorf("position %d class %q: %v, want ~%v", i, class[:1], got, want)
+	all := coverProb(sizes, n)
+	for k, class := range classes {
+		others := append(append([]int{}, sizes[:k]...), sizes[k+1:]...)
+		p := float64(sizes[k]) / 86 * coverProb(others, n-1) / all
+		sigma := math.Sqrt(p * (1 - p) / samples)
+		for i := range n {
+			if got := float64(counts[i][k]) / samples; math.Abs(got-p) > 5*sigma {
+				t.Errorf("position %d class %q: %.4f, want %.4f ± %.4f", i, class[:1], got, p, 5*sigma)
 			}
 		}
 	}

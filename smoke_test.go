@@ -90,7 +90,8 @@ func TestSmokeEndToEnd(t *testing.T) {
 	if wantRe.FindStringSubmatch(out) == nil {
 		t.Fatalf("login vault: out %q", out)
 	}
-	if strings.Count(out, wantRe.FindStringSubmatch(out)[1]) != 1 {
+	first := wantRe.FindStringSubmatch(out)[1]
+	if strings.Count(out, first) != 1 {
 		t.Fatal("generated password printed outside get")
 	}
 	var sessions int64
@@ -110,7 +111,8 @@ func TestSmokeEndToEnd(t *testing.T) {
 	step("recover new key", 0, "senha mestra redefinida\n", []string{"recover"}, email+"\n", m[1], "SenhaOutra1", "SenhaOutra1")
 
 	want := "email: senha mestra: \n" + added + "pm> "
-	if out := step("vault add again", 0, want, []string{"login"}, email+"\nadd\n"+item+"exit\n", "SenhaOutra1"); out != want {
+	item32 := strings.Replace(item, "\n\n", "\n32\n", 1)
+	if out := step("vault add again", 0, want, []string{"login"}, email+"\nadd\n"+item32+"exit\n", "SenhaOutra1"); out != want {
 		t.Fatalf("vault add again: out %q", out)
 	}
 	getRe := regexp.MustCompile(`senha: (\S+)\n`)
@@ -119,6 +121,9 @@ func TestSmokeEndToEnd(t *testing.T) {
 		t.Fatal("no password in get")
 	}
 	secret := got[1]
+	if len(secret) != 32 || secret == first {
+		t.Fatalf("second password %q (first %q)", secret, first)
+	}
 
 	rows, err := db.Raw("SELECT * FROM vault_items").Rows()
 	if err != nil {

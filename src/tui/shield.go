@@ -9,7 +9,11 @@ import (
 const (
 	thickness = 0.14
 	bottom    = -1.3
-	ramp      = ".:-=+*#%@"
+)
+
+var (
+	dotBit = [4][2]rune{{0x01, 0x08}, {0x02, 0x10}, {0x04, 0x20}, {0x40, 0x80}}
+	bayer  = [4][2]float64{{0, 4}, {6, 2}, {1, 5}, {7, 3}}
 )
 
 var light = normalize(-0.5, 0.6, 1)
@@ -51,24 +55,22 @@ func normalize(x, y, z float64) [3]float64 {
 }
 
 func shield(angle float64, w, h int) []string {
-	rows := min(h, 22)
-	scaleY := float64(rows-1) / (1 - bottom)
-	scaleX := 2 * scaleY
-	if 2*scaleX+1 > float64(w) {
-		scaleX = float64(w-1) / 2
-		scaleY = scaleX / 2
+	pw, ph := w*2, h*4
+	scale := float64(min(h, 22)*4-1) / (1 - bottom)
+	if 2*scale+1 > float64(pw) {
+		scale = float64(pw-1) / 2
 	}
-	cx, cy := float64(w-1)/2, float64(h-1)/2-(1+bottom)/2*scaleY
-	grid := make([]cell, w*h)
+	cx, cy := float64(pw-1)/2, float64(ph-1)/2-(1+bottom)/2*scale
+	grid := make([]cell, pw*ph)
 	sin, cos := math.Sincos(angle)
 
 	plot := func(x, y, z, nx, ny, nz, shade float64, side bool) {
 		rx, rz := x*cos+z*sin, -x*sin+z*cos
-		col, row := int(math.Round(cx+rx*scaleX)), int(math.Round(cy-y*scaleY))
-		if col < 0 || col >= w || row < 0 || row >= h {
+		col, row := int(math.Round(cx+rx*scale)), int(math.Round(cy-y*scale))
+		if col < 0 || col >= pw || row < 0 || row >= ph {
 			return
 		}
-		c := &grid[row*w+col]
+		c := &grid[row*pw+col]
 		if c.lum != 0 && rz <= c.z {
 			return
 		}
@@ -77,7 +79,7 @@ func shield(angle float64, w, h int) []string {
 		*c = cell{z: rz, lum: max(0.01, shade*(0.2+0.8*dot)), side: side}
 	}
 
-	step := 0.5 / scaleX
+	step := 0.5 / scale
 	for v := bottom; v <= 1; v += step / 2 {
 		hw := halfWidth(v)
 		for u := -hw; u <= hw; u += step {
@@ -107,17 +109,35 @@ func shield(angle float64, w, h int) []string {
 	for row := range h {
 		var b strings.Builder
 		for col := range w {
-			c := grid[row*w+col]
-			if c.lum == 0 {
+			var bits rune
+			var sum float64
+			lit, sides := 0, 0
+			for dy := range 4 {
+				for dx := range 2 {
+					c := grid[(row*4+dy)*pw+col*2+dx]
+					if c.lum == 0 {
+						continue
+					}
+					if lit == 0 || c.lum >= (bayer[dy][dx]+0.5)/8*0.8 {
+						bits |= dotBit[dy][dx]
+					}
+					lit++
+					sum += c.lum
+					if c.side {
+						sides++
+					}
+				}
+			}
+			if lit == 0 {
 				b.WriteByte(' ')
 				continue
 			}
-			ch := ramp[min(len(ramp)-1, int(c.lum*float64(len(ramp))))]
-			color := 238 + min(17, int(c.lum*18))
-			if c.side {
-				color = 67 + 6*min(2, int(c.lum*3))
+			lum := sum / float64(lit)
+			color := 238 + min(17, int(lum*18))
+			if 2*sides > lit {
+				color = 67 + 6*min(2, int(lum*3))
 			}
-			fmt.Fprintf(&b, "\x1b[38;5;%dm%c\x1b[0m", color, ch)
+			fmt.Fprintf(&b, "\x1b[38;5;%dm%c\x1b[0m", color, 0x2800+bits)
 		}
 		out[row] = b.String()
 	}

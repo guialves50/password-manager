@@ -136,3 +136,11 @@ func TestIPIgnoresForwardedHeader(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// Edge case: a malformed code is a guess against the account, not only the IP.
+func TestCheckMalformedCodeCountsForAccount(t *testing.T) {
+	a := &fakeAttempt{ok: true}
+	if _, err := newChecker(a).Check(context.Background(), &user.User{ID: 1}, sealed(t, 1), "12ab", "ip"); !errors.Is(err, ErrInvalid) || a.calls != 1 {
+		t.Fatalf("err %v account attempts %d", err, a.calls)
+	}
+}

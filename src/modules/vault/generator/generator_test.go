@@ -1,6 +1,7 @@
 package generator
 
 import (
+	"crypto/rand"
 	"errors"
 	"io"
 	"strings"
@@ -87,3 +88,33 @@ func TestGenerateRandFailure(t *testing.T) {
 type failing struct{}
 
 func (failing) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+
+func TestGenerateUsesCryptoRand(t *testing.T) {
+	if reader != rand.Reader {
+		t.Fatal("generator must read from crypto/rand.Reader")
+	}
+}
+
+func TestGenerateUniformPerPosition(t *testing.T) {
+	const samples, n = 20000, 20
+	classes := []string{upper, lower, digits, symbols}
+	counts := make([][4]int, n)
+	for range samples {
+		pw, _ := Generate(n)
+		for i, c := range pw {
+			for k, class := range classes {
+				if strings.ContainsRune(class, c) {
+					counts[i][k]++
+				}
+			}
+		}
+	}
+	for i := range n {
+		for k, class := range classes {
+			want := float64(samples) * float64(len(class)) / 86
+			if got := float64(counts[i][k]); got < want*0.85 || got > want*1.15 {
+				t.Errorf("position %d class %q: %v, want ~%v", i, class[:1], got, want)
+			}
+		}
+	}
+}

@@ -40,7 +40,7 @@ func TestGet(t *testing.T) {
 			return c.item, c.skipped, c.err
 		}
 		p, out := prompter("")
-		if err := NewGet(get)(context.Background(), p, s, "conta GMAIL"); err != c.err {
+		if err := NewGet(get, nil)(context.Background(), p, s, "conta GMAIL"); err != c.err {
 			t.Errorf("%s: err %v", c.name, err)
 		}
 		if len(names) != 1 || names[0] != "conta GMAIL" {
@@ -56,7 +56,7 @@ func TestGetWithoutNamePrintsUsage(t *testing.T) {
 	calls := 0
 	get := func(context.Context, *cli.Session, string) (dto.Item, int, error) { calls++; return dto.Item{}, 0, nil }
 	p, out := prompter("")
-	if err := NewGet(get)(context.Background(), p, session(), ""); err != nil || calls != 0 {
+	if err := NewGet(get, nil)(context.Background(), p, session(), ""); err != nil || calls != 0 {
 		t.Fatalf("err %v calls %d", err, calls)
 	}
 	if o := out.String(); o != "uso: get <nome>\n" {

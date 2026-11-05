@@ -11,16 +11,24 @@ import (
 
 type GetFunc func(ctx context.Context, s *cli.Session, name string) (dto.Item, int, error)
 
-func NewGet(get GetFunc) cli.SessionCommand {
+// NewGet shows one item by name; without a name, the TUI lets the user browse.
+func NewGet(get GetFunc, list ListFunc) cli.SessionCommand {
+	browse := NewList(list)
 	return func(ctx context.Context, p *cli.Prompter, s *cli.Session, arg string) error {
 		if arg == "" {
-			fmt.Fprintln(p.Out, "uso: get <nome>")
-			return nil
+			if p.Browse == nil {
+				fmt.Fprintln(p.Out, "uso: get <nome>")
+				return nil
+			}
+			return browse(ctx, p, s, "")
 		}
 		it, skipped, err := get(ctx, s, arg)
-		if err != nil {
+		switch {
+		case err != nil:
 			fmt.Fprintln(p.Out, vaulterrors.Message(err))
-		} else {
+		case p.Show != nil:
+			p.Show(entries([]dto.Item{it})[0])
+		default:
 			fmt.Fprintln(p.Out, "nome:", it.Name)
 			if it.Username != "" {
 				fmt.Fprintln(p.Out, "usuário:", it.Username)
@@ -33,9 +41,13 @@ func NewGet(get GetFunc) cli.SessionCommand {
 				fmt.Fprintln(p.Out, "notas:", it.Notes)
 			}
 		}
-		if skipped > 0 {
-			fmt.Fprintf(p.Out, "aviso: %d item(ns) ignorado(s) por falha de integridade\n", skipped)
-		}
+		warnSkipped(p, skipped)
 		return err
+	}
+}
+
+func warnSkipped(p *cli.Prompter, skipped int) {
+	if skipped > 0 {
+		fmt.Fprintf(p.Out, "aviso: %d item(ns) ignorado(s) por falha de integridade\n", skipped)
 	}
 }

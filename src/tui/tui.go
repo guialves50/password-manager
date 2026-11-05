@@ -56,6 +56,7 @@ type UI struct {
 	checkAt  time.Time
 
 	browser            *browser
+	form               *form
 	boxAt, boxClosedAt time.Time
 	closedRows         int
 }
@@ -90,6 +91,9 @@ func (u *UI) Prompter() *cli.Prompter {
 			u.art = lines
 		},
 		Browse: u.browse,
+		Pick:   u.pick,
+		Show:   u.show,
+		Box:    u.openForm,
 		ShowCheck: func() {
 			u.mu.Lock()
 			defer u.mu.Unlock()
@@ -203,7 +207,7 @@ func (u *UI) key(c byte) {
 			u.input = u.input[:len(u.input)-size]
 		}
 	default:
-		if c == '?' && len(u.input) == 0 && !u.secret {
+		if c == '?' && len(u.input) == 0 && !u.secret && u.form == nil {
 			u.help = !u.help
 			return
 		}
@@ -297,7 +301,7 @@ func (u *UI) Render(w, h int) []string {
 	if u.email != "" {
 		who = u.email
 		desc = "Cofre aberto. A sessão expira após 30 min sem uso."
-		hint, status = "add, list, get <nome>, delete <nome>, 2fa ou exit", "cofre aberto"
+		hint, status = "add, list, get [nome], delete [nome], 2fa ou exit", "cofre aberto"
 	}
 	screen[1] = "  " + dim + ">_ " + reset + bold + "Guardian" + reset + dim + " (" + Version + ")" + reset
 	screen[2] = "     " + dim + u.server + " · " + reset + who
@@ -314,6 +318,10 @@ func (u *UI) Render(w, h int) []string {
 		middle = morph(shieldRaster(u.angle, w, area), boxRaster(w, area, u.browser.rows()), float64(u.now().Sub(u.boxAt))/float64(boxMorph)).lines()
 	case u.browser != nil:
 		middle = u.browser.view(w, area)
+	case u.form != nil && u.now().Sub(u.boxAt) < boxMorph:
+		middle = morph(shieldRaster(u.angle, w, area), boxRaster(w, area, u.form.rows), float64(u.now().Sub(u.boxAt))/float64(boxMorph)).lines()
+	case u.form != nil:
+		middle = u.formView(w, area)
 	case !u.boxClosedAt.IsZero() && u.now().Sub(u.boxClosedAt) < boxMorph:
 		middle = morph(boxRaster(w, area, u.closedRows), shieldRaster(u.angle, w, area), float64(u.now().Sub(u.boxClosedAt))/float64(boxMorph)).lines()
 	case u.help:

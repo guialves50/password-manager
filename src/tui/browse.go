@@ -16,22 +16,46 @@ const (
 	masked   = "••••••••"
 )
 
-// browser is the list box opened by `list`: a cursor over entries and, once
-// one is opened, its fields with the secret hidden until revealed.
+// browser is the list box: a cursor over entries and, once one is opened,
+// its fields with the secret hidden until revealed. pick makes Enter choose
+// the entry instead of opening it; direct starts on one entry's details.
 type browser struct {
 	entries      []cli.Entry
 	sel, top     int
 	open, reveal bool
-	done         chan struct{}
+	pick, direct bool
+	done         chan int // the picked index, or -1
 }
 
-// browse blocks until the user closes the box (Esc or ctrl+c).
-func (u *UI) browse(entries []cli.Entry) {
-	b := &browser{entries: entries, done: make(chan struct{})}
+// openBrowser blocks until the user closes the box.
+func (u *UI) openBrowser(b *browser) int {
+	b.done = make(chan int, 1)
 	u.mu.Lock()
-	u.browser, u.log, u.help, u.boxAt, u.boxClosedAt = b, nil, false, u.now(), time.Time{}
+	u.browser, u.log, u.help = b, nil, false
+	u.startBox()
 	u.mu.Unlock()
-	<-b.done
+	return <-b.done
+}
+
+func (u *UI) browse(entries []cli.Entry) { u.openBrowser(&browser{entries: entries}) }
+
+func (u *UI) pick(entries []cli.Entry) (int, bool) {
+	i := u.openBrowser(&browser{entries: entries, pick: true})
+	return i, i >= 0
+}
+
+func (u *UI) show(e cli.Entry) {
+	u.openBrowser(&browser{entries: []cli.Entry{e}, open: true, direct: true})
+}
+
+// startBox (mu held) morphs the box out of the shield, unless a box was just
+// on screen: then the new one takes its place without a detour through the shield.
+func (u *UI) startBox() {
+	u.boxAt = u.now()
+	if !u.boxClosedAt.IsZero() && u.boxAt.Sub(u.boxClosedAt) < boxMorph {
+		u.boxAt = u.boxAt.Add(-boxMorph)
+	}
+	u.boxClosedAt = time.Time{}
 }
 
 func (u *UI) browseKey(k string) {
@@ -46,24 +70,28 @@ func (u *UI) browseKey(k string) {
 			b.sel = min(len(b.entries)-1, b.sel+1)
 		}
 	case "enter", "right":
+		if b.pick {
+			u.closeBrowser(b.sel)
+			return
+		}
 		b.open, b.reveal = true, false
 	case "space":
 		b.reveal = b.open && !b.reveal
-	case "left":
-		b.open, b.reveal = false, false
-	case "esc":
-		if b.open {
+	case "left", "esc":
+		if b.open && !b.direct {
 			b.open, b.reveal = false, false
 			return
 		}
-		u.closeBrowser()
+		if k == "esc" || b.direct {
+			u.closeBrowser(-1)
+		}
 	case "cancel":
-		u.closeBrowser()
+		u.closeBrowser(-1)
 	}
 }
 
-func (u *UI) closeBrowser() {
-	close(u.browser.done)
+func (u *UI) closeBrowser(picked int) {
+	u.browser.done <- picked
 	u.closedRows = u.browser.rows()
 	u.browser, u.boxClosedAt = nil, u.now()
 }
@@ -100,11 +128,11 @@ func (b *browser) rows() int {
 
 // view draws the box with the list or the opened entry inside it.
 func (b *browser) view(w, h int) []string {
-	x0, y0, bw, bh := box(w, h, b.rows())
-	cells := boxRaster(w, h, b.rows()).cells()
-	inner := bw - 4
+	_, _, _, bh := box(w, h, b.rows())
 	var text []string
-	if b.open {
+	hint := "↑↓ navegar · enter abrir · esc sair"
+	switch {
+	case b.open:
 		e := b.entries[b.sel]
 		text = append(text, bold+e.Title+reset, "")
 		for _, f := range e.Fields {
@@ -114,8 +142,16 @@ func (b *browser) view(w, h int) []string {
 			}
 			text = append(text, dim+padLabel(f.Label)+reset+v)
 		}
-	} else {
-		text = append(text, bold+"cofre"+reset+dim+" · "+count(len(b.entries))+reset, "")
+		hint = "espaço mostra/oculta a senha · esc volta"
+		if b.direct {
+			hint = "espaço mostra/oculta a senha · esc fecha"
+		}
+	default:
+		title := bold + "cofre" + reset + dim + " · " + count(len(b.entries)) + reset
+		if b.pick {
+			title, hint = bold+"escolha um item"+reset, "↑↓ navegar · enter escolher · esc cancelar"
+		}
+		text = append(text, title, "")
 		vis := bh - 6
 		b.top = min(b.top, b.sel)
 		b.top = max(b.top, b.sel-vis+1)
@@ -127,14 +163,22 @@ func (b *browser) view(w, h int) []string {
 			}
 		}
 	}
-	hint := "↑↓ navegar · enter abrir · esc sair"
-	if b.open {
-		hint = "espaço mostra/oculta a senha · esc volta"
+	return drawBox(w, h, b.rows(), text, hint)
+}
+
+// drawBox lays text (title line, blank, body) and a hint inside the box frame.
+// A body taller than the box keeps its last lines, so the newest stay visible.
+func drawBox(w, h, rows int, text []string, hint string) []string {
+	x0, y0, bw, bh := box(w, h, rows)
+	cells := boxRaster(w, h, rows).cells()
+	inner, room := bw-4, bh-4
+	if len(text) > room {
+		text = append(text[:2:2], text[len(text)-(room-2):]...)
 	}
-	for len(text) < bh-4 {
+	for len(text) < room {
 		text = append(text, "")
 	}
-	text = append(text[:bh-4], dim+hint+reset)
+	text = append(text, dim+hint+reset)
 	for i, t := range text {
 		row := cells[y0+1+i]
 		row[x0+2] = fit(t, inner) + reset

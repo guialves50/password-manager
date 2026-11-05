@@ -32,7 +32,7 @@ func deleteCommand(t *testing.T, s *cli.Session, it dto.Item, skipped int, findE
 		calls.dels = append(calls.dels, id)
 		return delErr
 	}
-	return NewDelete(find, del), calls
+	return NewDelete(find, nil, del), calls
 }
 
 func TestDeleteConfirmed(t *testing.T) {

@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"gorm.io/gorm"
-
-	"github.com/guialves50/password-manager/src/modules/auth/totp"
 )
 
 type Repository struct {
@@ -69,7 +67,7 @@ func (r *Repository) SetTOTPPending(ctx context.Context, id uint64, blob []byte)
 func (r *Repository) TOTPAttempt(ctx context.Context, id uint64, now time.Time) (bool, error) {
 	res := r.db.WithContext(ctx).Model(&User{}).Where("id = ? AND (totp_locked_until IS NULL OR totp_locked_until <= ?::timestamptz)", id, now).Updates(map[string]any{
 		"totp_failures":     gorm.Expr("CASE WHEN totp_locked_until IS NOT NULL THEN 1 ELSE totp_failures + 1 END"),
-		"totp_locked_until": gorm.Expr("CASE WHEN totp_locked_until IS NULL AND totp_failures + 1 >= ? THEN ?::timestamptz END", totp.MaxFailures, now.Add(totp.LockDuration)),
+		"totp_locked_until": gorm.Expr("CASE WHEN totp_locked_until IS NULL AND totp_failures + 1 >= ? THEN ?::timestamptz END", MaxTOTPFailures, now.Add(TOTPLockDuration)),
 	})
 	return res.RowsAffected == 1, res.Error
 }

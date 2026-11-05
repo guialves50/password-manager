@@ -5,6 +5,8 @@ import "time"
 const (
 	MaxFailedAttempts = 5
 	LockDuration      = 15 * time.Minute
+	MaxTOTPFailures   = 3
+	TOTPLockDuration  = 10 * time.Minute
 )
 
 type User struct {

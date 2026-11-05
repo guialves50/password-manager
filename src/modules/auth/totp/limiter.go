@@ -3,6 +3,8 @@ package totp
 import (
 	"sync"
 	"time"
+
+	"github.com/guialves50/password-manager/src/modules/user"
 )
 
 // ponytail: in-memory per process; resets on restart and isn't shared between
@@ -47,11 +49,11 @@ func (l *Limiter) Fail(ip string) {
 		e = &ipEntry{since: now}
 		l.m[ip] = e
 	}
-	if e.fails++; e.fails >= MaxFailures {
-		e.until = now.Add(LockDuration)
+	if e.fails++; e.fails >= user.MaxTOTPFailures {
+		e.until = now.Add(user.TOTPLockDuration)
 	}
 }
 
 func (l *Limiter) stale(e *ipEntry, now time.Time) bool {
-	return !now.Before(e.since.Add(LockDuration)) && !now.Before(e.until)
+	return !now.Before(e.since.Add(user.TOTPLockDuration)) && !now.Before(e.until)
 }

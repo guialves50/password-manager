@@ -15,11 +15,9 @@ import (
 )
 
 const (
-	Step         = 30
-	Digits       = 6
-	Issuer       = "Guardian"
-	MaxFailures  = 3
-	LockDuration = 10 * time.Minute
+	Step   = 30
+	Digits = 6
+	Issuer = "Guardian"
 )
 
 func Code(secret []byte, counter uint64, digits int) string {

@@ -193,7 +193,9 @@ func TestLoginAsksTOTPCodeOnDemand(t *testing.T) {
 	}
 }
 
-func TestLoginShowsCheckOnlyAfter2FA(t *testing.T) {
+// The login runs inside the box; success (with or without 2FA) closes it on
+// the check before the vault opens, failure dissolves it and then reports.
+func TestLoginBoxClosesWithCheckBeforeShell(t *testing.T) {
 	for _, askCode := range []bool{true, false} {
 		login := func(_ context.Context, in dto.Input) (*cli.Session, error) {
 			if askCode {
@@ -206,35 +208,40 @@ func TestLoginShowsCheckOnlyAfter2FA(t *testing.T) {
 			input = "a@example.com\n123456\nexit\n"
 		}
 		p, _ := prompter(input, "SenhaForte1")
-		checks, checksAtShell := 0, -1
-		p.ShowCheck = func() { checks++ }
+		var events []string
+		p.Box = func(title string) func(bool) {
+			events = append(events, "open "+title)
+			return func(ok bool) { events = append(events, fmt.Sprint("close ", ok)) }
+		}
 		p.OnSession = func(s *cli.Session) {
 			if s != nil {
-				checksAtShell = checks
+				events = append(events, "shell")
 			}
 		}
 		if err := New(login, (&logoutSpy{}).logout, nil)(context.Background(), p); err != nil {
 			t.Fatal(err)
 		}
-		want := 0
-		if askCode {
-			want = 1
-		}
-		if checks != want || checksAtShell != want {
-			t.Errorf("askCode=%v: checks %d (before shell %d), want %d", askCode, checks, checksAtShell, want)
+		if got := strings.Join(events, "|"); got != "open entrar|close true|shell" {
+			t.Errorf("askCode=%v: %s", askCode, got)
 		}
 	}
 }
 
-func TestLoginFailedCodeShowsNoCheck(t *testing.T) {
+func TestLoginFailureDissolvesBoxThenReports(t *testing.T) {
 	login := func(_ context.Context, in dto.Input) (*cli.Session, error) {
 		in.Code()
 		return nil, autherrors.ErrInvalidTOTP
 	}
 	p, out := prompter("a@example.com\n000000\n", "SenhaForte1")
-	checks := 0
-	p.ShowCheck = func() { checks++ }
-	if err := New(login, (&logoutSpy{}).logout, nil)(context.Background(), p); err == nil || checks != 0 || !strings.HasSuffix(out.String(), "código 2FA inválido\n") {
-		t.Fatalf("err %v checks %d out %q", err, checks, out.String())
+	var events []string
+	p.Box = func(string) func(bool) {
+		return func(ok bool) { events = append(events, fmt.Sprintf("close %v @%s", ok, out.String())) }
+	}
+	err := New(login, (&logoutSpy{}).logout, nil)(context.Background(), p)
+	if err == nil || len(events) != 1 || events[0] != "close false @email: senha mestra: \ncódigo 2FA: " {
+		t.Fatalf("err %v events %q", err, events)
+	}
+	if !strings.HasSuffix(out.String(), "código 2FA inválido\n") {
+		t.Fatalf("out %q", out.String())
 	}
 }

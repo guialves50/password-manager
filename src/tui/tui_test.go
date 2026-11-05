@@ -373,6 +373,9 @@ func TestCheckFormsThenShieldReturns(t *testing.T) {
 	if lo, hi := columns(strings.Split(at(900*time.Millisecond), "\n")); hi-lo <= spanOf(held) {
 		t.Fatalf("no pop/ring: span %d vs held %d", hi-lo, spanOf(held))
 	}
+	if lo, hi := columns(strings.Split(at(1250*time.Millisecond), "\n")); hi-lo <= spanOf(held)+3 {
+		t.Fatalf("no ring after the pop: span %d vs held %d", hi-lo, spanOf(held))
+	}
 	morphing := at(2600 * time.Millisecond)
 	if !strings.Contains(morphing, checkColor) || !regexp.MustCompile(`38;5;(2[3-5]\d|67|73|79)m`).MatchString(morphing) {
 		t.Fatal("morph frame does not mix check and shield dots")

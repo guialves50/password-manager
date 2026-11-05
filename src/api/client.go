@@ -27,7 +27,10 @@ func New(rawURL string) (*Client, error) {
 	if err != nil || u.Host == "" || !secure(u) {
 		return nil, autherrors.ErrInsecureServer
 	}
-	return &Client{base: strings.TrimRight(u.String(), "/"), http: &http.Client{Timeout: 30 * time.Second}}, nil
+	return &Client{base: strings.TrimRight(u.String(), "/"), http: &http.Client{
+		Timeout:       30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}}, nil
 }
 
 func secure(u *url.URL) bool {
@@ -81,6 +84,9 @@ func decodeError(res *http.Response) error {
 		Minutes int    `json:"minutes"`
 	}
 	json.NewDecoder(io.LimitReader(res.Body, 4096)).Decode(&e)
+	if res.StatusCode == http.StatusServiceUnavailable && e.Error == "busy" {
+		return autherrors.ErrBusy
+	}
 	if res.StatusCode < 500 {
 		switch e.Error {
 		case "email_taken":

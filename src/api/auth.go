@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/guialves50/password-manager/src/modules/auth/keys"
 	login "github.com/guialves50/password-manager/src/modules/auth/login/dto"
 	prelogin "github.com/guialves50/password-manager/src/modules/auth/prelogin/dto"
 	recovery "github.com/guialves50/password-manager/src/modules/auth/recover/dto"
@@ -15,7 +16,9 @@ func (c *Client) Prelogin(ctx context.Context, email string) (prelogin.Response,
 	if err := c.do(ctx, "POST", "/prelogin", "", prelogin.Request{Email: email}, &out); err != nil {
 		return prelogin.Response{}, err
 	}
-	if out.KDF.Time == 0 || out.KDF.MemoryKiB == 0 || out.KDF.Threads == 0 || len(out.MasterSalt) != 16 || len(out.RecoverySalt) != 16 {
+	d := keys.DefaultParams
+	if out.KDF.Time < d.Time || out.KDF.MemoryKiB < d.MemoryKiB || out.KDF.Threads == 0 ||
+		out.KDF.Time > 10*d.Time || out.KDF.MemoryKiB > 16*d.MemoryKiB || len(out.MasterSalt) != 16 || len(out.RecoverySalt) != 16 {
 		return prelogin.Response{}, errors.New("api: invalid prelogin response")
 	}
 	return out, nil

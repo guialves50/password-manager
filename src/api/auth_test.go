@@ -87,6 +87,11 @@ func TestPreloginRejectsUnusableResponse(t *testing.T) {
 		`{"kdf":{"time":0,"memory_kib":65536,"threads":4}` + salts,
 		`{"kdf":{"time":3,"memory_kib":0,"threads":4}` + salts,
 		`{"kdf":{"time":3,"memory_kib":65536,"threads":0}` + salts,
+		`{"kdf":{"time":2,"memory_kib":65536,"threads":4}` + salts,
+		`{"kdf":{"time":3,"memory_kib":65535,"threads":4}` + salts,
+		`{"kdf":{"time":1,"memory_kib":8192,"threads":1}` + salts,
+		`{"kdf":{"time":31,"memory_kib":65536,"threads":4}` + salts,
+		`{"kdf":{"time":3,"memory_kib":1048577,"threads":4}` + salts,
 		`{"kdf":{"time":3,"memory_kib":65536,"threads":4},"master_salt":"","recovery_salt":"` + b64(r16) + `"}`,
 		`{"kdf":{"time":3,"memory_kib":65536,"threads":4},"master_salt":"` + b64(s16) + `"}`,
 	} {

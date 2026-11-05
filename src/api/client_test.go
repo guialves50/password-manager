@@ -88,6 +88,8 @@ func TestDoMapsErrorCodes(t *testing.T) {
 		{502, `bad gateway`, "erro interno"},
 		{418, `{"error":"teapot"}`, "erro interno"},
 		{423, `{"error":"locked"}`, "erro interno"},
+		{503, `{"error":"busy"}`, "servidor ocupado, tente novamente em instantes"},
+		{503, `{"error":"internal"}`, "erro interno"},
 	}
 	for _, tc := range cases {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -110,5 +112,25 @@ func TestDoMapsErrorCodes(t *testing.T) {
 	c, _ := New(srv.URL)
 	if err := c.do(context.Background(), "POST", "/login", "", nil, nil); !errors.As(err, &locked) || locked.Minutes != 15 {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestDoRefusesRedirects(t *testing.T) {
+	hits := 0
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits++ }))
+	defer target.Close()
+	for _, code := range []int{301, 302, 307, 308} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, target.URL+"/login", code)
+		}))
+		c, _ := New(srv.URL)
+		err := c.do(context.Background(), "POST", "/login", "tok", map[string]string{"auth_hash": "x"}, nil)
+		if err == nil || vaulterrors.Message(err) != "erro interno" {
+			t.Errorf("%d: got %v", code, err)
+		}
+		srv.Close()
+	}
+	if hits != 0 {
+		t.Fatalf("redirect followed %d times", hits)
 	}
 }

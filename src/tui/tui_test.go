@@ -183,3 +183,114 @@ func TestRenderTinyTerminal(t *testing.T) {
 		}
 	}
 }
+
+type clock struct{ t time.Time }
+
+func (c *clock) now() time.Time { return c.t }
+
+func pendingLine(t *testing.T, u *UI, p *cli.Prompter, label string) chan string {
+	t.Helper()
+	ch := make(chan string, 1)
+	go func() { s, _ := p.Line(label); ch <- s }()
+	waitFor(t, u, func() bool { return u.waiting != nil })
+	return ch
+}
+
+func TestLoginClearsToShield(t *testing.T) {
+	u := New("x")
+	p := u.Prompter()
+	u.Write([]byte("› login\nemail: a@b.com\nsenha mestra: \n"))
+	p.OnSession(&cli.Session{Email: "a@b.com"})
+	if len(u.log) != 0 {
+		t.Fatalf("log after login %q", u.log)
+	}
+	u.Write([]byte("item salvo\n"))
+	p.OnSession(nil)
+	if len(u.log) != 0 {
+		t.Fatalf("log after logout %q", u.log)
+	}
+}
+
+func TestIdleTopPromptClearsAfterFiveSeconds(t *testing.T) {
+	for _, label := range []string{"", "guardian> "} {
+		c := &clock{t: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+		u := New("x")
+		u.now = c.now
+		p := u.Prompter()
+		u.Write([]byte("cofre vazio\n"))
+		done := pendingLine(t, u, p, label)
+		u.Feed([]byte("li"))
+		c.t = c.t.Add(idleClear - time.Millisecond)
+		u.Tick()
+		if len(u.log) != 1 {
+			t.Fatalf("%q: cleared early: %q", label, u.log)
+		}
+		c.t = c.t.Add(time.Millisecond)
+		u.Tick()
+		if len(u.log) != 0 || string(u.input) != "li" || u.partial != label {
+			t.Fatalf("%q: log %q input %q partial %q", label, u.log, u.input, u.partial)
+		}
+		u.Feed([]byte("st\r"))
+		if got := <-done; got != "list" {
+			t.Fatalf("%q: line %q", label, got)
+		}
+	}
+}
+
+func TestMidCommandPromptNeverClears(t *testing.T) {
+	c := &clock{t: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	u := New("x")
+	u.now = c.now
+	p := u.Prompter()
+	u.Write([]byte("guardian> add\n"))
+	done := pendingLine(t, u, p, "nome: ")
+	c.t = c.t.Add(time.Hour)
+	u.Tick()
+	if len(u.log) != 1 {
+		t.Fatalf("cleared mid-command: %q", u.log)
+	}
+	u.Feed([]byte("gmail\r"))
+	<-done
+
+	secret := make(chan struct{})
+	go func() { p.Secret("senha mestra: "); close(secret) }()
+	waitFor(t, u, func() bool { return u.waiting != nil })
+	c.t = c.t.Add(time.Hour)
+	u.Tick()
+	if len(u.log) != 2 {
+		t.Fatalf("cleared at secret prompt: %q", u.log)
+	}
+	u.Feed([]byte("\r"))
+	<-secret
+}
+
+func TestTimerRestartsAfterEachCommand(t *testing.T) {
+	c := &clock{t: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	u := New("x")
+	u.now = c.now
+	p := u.Prompter()
+	done := pendingLine(t, u, p, "guardian> ")
+	c.t = c.t.Add(4 * time.Second)
+	u.Feed([]byte("list\r"))
+	<-done
+	u.Tick()
+	u.Write([]byte("gmail\n"))
+	c.t = c.t.Add(2 * time.Second)
+	u.Tick()
+	if len(u.log) != 2 {
+		t.Fatalf("cleared while command ran: %q", u.log)
+	}
+	done = pendingLine(t, u, p, "guardian> ")
+	c.t = c.t.Add(4 * time.Second)
+	u.Tick()
+	if len(u.log) != 2 {
+		t.Fatalf("old deadline reused: %q", u.log)
+	}
+	c.t = c.t.Add(time.Second)
+	u.Tick()
+	if len(u.log) != 0 {
+		t.Fatalf("not cleared: %q", u.log)
+	}
+	u.Feed([]byte("\x03"))
+	<-done
+}

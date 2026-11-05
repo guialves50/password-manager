@@ -16,6 +16,10 @@ func TestMessages(t *testing.T) {
 		ErrEmailTaken:             "email já cadastrado",
 		ErrInvalidCredentials:     "email ou senha mestra inválidos",
 		ErrInvalidRecovery:        "email ou chave de recuperação inválidos",
+		ErrUnreachable:            "não foi possível conectar ao servidor",
+		ErrSessionExpired:         "sessão expirada, faça login novamente",
+		ErrInsecureServer:         "use https para servidores fora do localhost",
+		ErrBusy:                   "servidor ocupado, tente novamente em instantes",
 		&LockedError{Minutes: 15}: "conta bloqueada, tente novamente em 15 minutos",
 		&LockedError{Minutes: 1}:  "conta bloqueada, tente novamente em 1 minutos",
 	}
@@ -33,6 +37,9 @@ func TestMessage(t *testing.T) {
 		ErrEmailTaken:                           "email já cadastrado",
 		ErrInvalidCredentials:                   "email ou senha mestra inválidos",
 		fmt.Errorf("x: %w", ErrInvalidRecovery): "email ou chave de recuperação inválidos",
+		fmt.Errorf("x: %w", ErrUnreachable):     "não foi possível conectar ao servidor",
+		fmt.Errorf("x: %w", ErrSessionExpired):  "sessão expirada, faça login novamente",
+		ErrInsecureServer:                       "use https para servidores fora do localhost",
 		&LockedError{Minutes: 3}:                "conta bloqueada, tente novamente em 3 minutos",
 		errors.New("pq: SenhaForte1"):           "erro interno",
 	}

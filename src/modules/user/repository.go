@@ -28,12 +28,13 @@ func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, erro
 	return &u, nil
 }
 
-func (r *Repository) RecordFailure(ctx context.Context, id uint64) error {
+func (r *Repository) Attempt(ctx context.Context, id uint64) (bool, error) {
 	now := time.Now()
-	return r.db.WithContext(ctx).Model(&User{}).Where("id = ?", id).Updates(map[string]any{
+	res := r.db.WithContext(ctx).Model(&User{}).Where("id = ? AND (locked_until IS NULL OR locked_until <= ?::timestamptz)", id, now).Updates(map[string]any{
 		"failed_attempts": gorm.Expr("CASE WHEN locked_until IS NOT NULL AND locked_until <= ?::timestamptz THEN 1 ELSE failed_attempts + 1 END", now),
 		"locked_until":    gorm.Expr("CASE WHEN locked_until IS NOT NULL AND locked_until <= ?::timestamptz THEN NULL WHEN failed_attempts + 1 >= ? THEN ?::timestamptz ELSE locked_until END", now, MaxFailedAttempts, now.Add(LockDuration)),
-	}).Error
+	})
+	return res.RowsAffected == 1, res.Error
 }
 
 func (r *Repository) ResetFailures(ctx context.Context, id uint64) error {

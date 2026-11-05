@@ -10,28 +10,30 @@ import (
 	"github.com/guialves50/password-manager/src/cli"
 	"github.com/guialves50/password-manager/src/modules/auth/keys"
 	"github.com/guialves50/password-manager/src/modules/vault/items/dto"
-	"github.com/guialves50/password-manager/src/modules/vault/items/repository"
 )
 
 type fakeRepo struct {
-	rows      []repository.Item
-	listErr   error
-	listedFor []uint64
-	createErr error
-	created   []repository.Item
+	rows       []dto.StoredItem
+	listErr    error
+	listedFor  []uint64
+	createErr  error
+	created    []dto.StoredItem
+	createdFor []uint64
 }
 
-func (f *fakeRepo) ListByUser(_ context.Context, userID uint64) ([]repository.Item, error) {
-	f.listedFor = append(f.listedFor, userID)
+func (f *fakeRepo) ListItems(_ context.Context, s *cli.Session) ([]dto.StoredItem, error) {
+	f.listedFor = append(f.listedFor, s.UserID)
 	return f.rows, f.listErr
 }
 
-func (f *fakeRepo) Create(_ context.Context, it *repository.Item) error {
-	f.created = append(f.created, *it)
+func (f *fakeRepo) CreateItem(_ context.Context, s *cli.Session, id string, blob []byte) error {
+	it := dto.StoredItem{ID: id, Blob: blob}
+	f.created = append(f.created, it)
+	f.createdFor = append(f.createdFor, s.UserID)
 	if f.createErr != nil {
 		return f.createErr
 	}
-	f.rows = append(f.rows, *it)
+	f.rows = append(f.rows, it)
 	return nil
 }
 
@@ -48,16 +50,16 @@ func itemAAD(userID uint64, id string) []byte {
 	return []byte(fmt.Sprintf("pm/item/v1|%d|%s", userID, id))
 }
 
-func sealRow(t *testing.T, key []byte, userID uint64, rowID, aadID string, plain []byte) repository.Item {
+func sealRow(t *testing.T, key []byte, userID uint64, rowID, aadID string, plain []byte) dto.StoredItem {
 	t.Helper()
 	blob, err := keys.Seal(key, plain, itemAAD(userID, aadID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return repository.Item{ID: rowID, UserID: 42, Blob: blob}
+	return dto.StoredItem{ID: rowID, Blob: blob}
 }
 
-func row(t *testing.T, s *cli.Session, id string, it dto.Item) repository.Item {
+func row(t *testing.T, s *cli.Session, id string, it dto.Item) dto.StoredItem {
 	t.Helper()
 	plain, err := json.Marshal(it)
 	if err != nil {
@@ -81,7 +83,7 @@ func TestDecryptAllSkipsItemsThatFailIntegrity(t *testing.T) {
 	tampered := row(t, s, "id-tampered", dto.Item{Name: "tampered", Password: "p"})
 	tampered.Blob[len(tampered.Blob)-1] ^= 1
 
-	repo := &fakeRepo{rows: []repository.Item{
+	repo := &fakeRepo{rows: []dto.StoredItem{
 		row(t, s, "id-1", gmail),
 		sealRow(t, s.VaultKey, s.UserID, "id-swapped", "id-1", plain),
 		sealRow(t, s.VaultKey, 7, "id-other-user", "id-other-user", plain),

@@ -17,6 +17,10 @@ type User struct {
 	MasterWrappedKey   []byte `gorm:"not null"`
 	RecoverySalt       []byte `gorm:"not null"`
 	RecoveryWrappedKey []byte `gorm:"not null"`
+	AuthSalt           []byte `gorm:"not null"`
+	AuthHash           []byte `gorm:"not null"`
+	RecoveryAuthSalt   []byte `gorm:"not null"`
+	RecoveryAuthHash   []byte `gorm:"not null"`
 	FailedAttempts     int    `gorm:"not null;default:0"`
 	LockedUntil        *time.Time
 	CreatedAt          time.Time

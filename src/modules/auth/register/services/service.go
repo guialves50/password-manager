@@ -7,16 +7,16 @@ import (
 	autherrors "github.com/guialves50/password-manager/src/modules/auth/errors"
 	"github.com/guialves50/password-manager/src/modules/auth/keys"
 	"github.com/guialves50/password-manager/src/modules/auth/policy"
+	prelogin "github.com/guialves50/password-manager/src/modules/auth/prelogin/dto"
 	"github.com/guialves50/password-manager/src/modules/auth/register/dto"
-	"github.com/guialves50/password-manager/src/modules/user"
 )
 
-type creator interface {
-	Create(ctx context.Context, u *user.User) error
+type registrar interface {
+	Register(ctx context.Context, req dto.Request) error
 }
 
 type Service struct {
-	Repo   creator
+	API    registrar
 	Params keys.Params
 }
 
@@ -55,31 +55,28 @@ func (s *Service) Register(ctx context.Context, in dto.Input) (dto.Output, error
 	recoverySecret := keys.NormalizeRecoveryKey([]byte(recoveryKey))
 	defer keys.Zero(recoverySecret)
 
-	masterKEK := keys.Derive(in.Password, masterSalt, s.Params)
-	defer keys.Zero(masterKEK)
-	recoveryKEK := keys.Derive(recoverySecret, recoverySalt, s.Params)
-	defer keys.Zero(recoveryKEK)
-
-	masterBlob, err := keys.Seal(masterKEK, vaultKey, []byte("pm/master/v1|"+email))
+	masterBlob, authHash, err := keys.Wrap(in.Password, masterSalt, s.Params, vaultKey, []byte("pm/master/v1|"+email))
 	if err != nil {
 		return dto.Output{}, err
 	}
-	recoveryBlob, err := keys.Seal(recoveryKEK, vaultKey, []byte("pm/recovery/v1|"+email))
+	defer keys.Zero(authHash)
+	recoveryBlob, recoveryAuthHash, err := keys.Wrap(recoverySecret, recoverySalt, s.Params, vaultKey, []byte("pm/recovery/v1|"+email))
 	if err != nil {
 		return dto.Output{}, err
 	}
+	defer keys.Zero(recoveryAuthHash)
 
-	u := &user.User{
-		Email:              email,
-		KDFTime:            s.Params.Time,
-		KDFMemoryKiB:       s.Params.MemoryKiB,
-		KDFThreads:         s.Params.Threads,
-		MasterSalt:         masterSalt,
-		MasterWrappedKey:   masterBlob,
-		RecoverySalt:       recoverySalt,
-		RecoveryWrappedKey: recoveryBlob,
-	}
-	if err := s.Repo.Create(ctx, u); err != nil {
+	err = s.API.Register(ctx, dto.Request{
+		Email:            email,
+		KDF:              prelogin.KDF{Time: s.Params.Time, MemoryKiB: s.Params.MemoryKiB, Threads: s.Params.Threads},
+		MasterSalt:       masterSalt,
+		MasterBlob:       masterBlob,
+		AuthHash:         authHash,
+		RecoverySalt:     recoverySalt,
+		RecoveryBlob:     recoveryBlob,
+		RecoveryAuthHash: recoveryAuthHash,
+	})
+	if err != nil {
 		return dto.Output{}, err
 	}
 	return dto.Output{RecoveryKey: recoveryKey}, nil

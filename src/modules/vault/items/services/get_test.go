@@ -8,14 +8,13 @@ import (
 
 	vaulterrors "github.com/guialves50/password-manager/src/modules/vault/errors"
 	"github.com/guialves50/password-manager/src/modules/vault/items/dto"
-	"github.com/guialves50/password-manager/src/modules/vault/items/repository"
 )
 
 func TestGetFindsOldestMatchIgnoringCase(t *testing.T) {
 	s := session(t)
 	older := dto.Item{Name: "gmail", Username: "alice", Password: "antiga", URL: "https://mail.google.com", Notes: "n"}
 	bank := dto.Item{Name: "conta banco", Password: "1234"}
-	repo := &fakeRepo{rows: []repository.Item{
+	repo := &fakeRepo{rows: []dto.StoredItem{
 		row(t, s, "id-1", older),
 		row(t, s, "id-2", dto.Item{Name: "Gmail", Password: "nova"}),
 		row(t, s, "id-3", bank),
@@ -39,7 +38,7 @@ func TestGetFindsOldestMatchIgnoringCase(t *testing.T) {
 
 func TestGetNotFound(t *testing.T) {
 	s := session(t)
-	repo := &fakeRepo{rows: []repository.Item{row(t, s, "id-1", dto.Item{Name: "gmail", Password: "p"})}}
+	repo := &fakeRepo{rows: []dto.StoredItem{row(t, s, "id-1", dto.Item{Name: "gmail", Password: "p"})}}
 	got, skipped, err := (&GetService{Repo: repo}).Get(context.Background(), s, "outlook")
 	if !errors.Is(err, vaulterrors.ErrNotFound) || got != (dto.Item{}) || skipped != 0 {
 		t.Fatalf("got %+v, %d, %v", got, skipped, err)
@@ -51,7 +50,7 @@ func TestGetNeverReturnsItemThatFailsIntegrity(t *testing.T) {
 	plain, _ := json.Marshal(dto.Item{Name: "bank", Password: "segredo"})
 	tampered := row(t, s, "id-3", dto.Item{Name: "bank", Password: "segredo"})
 	tampered.Blob[len(tampered.Blob)-1] ^= 1
-	repo := &fakeRepo{rows: []repository.Item{
+	repo := &fakeRepo{rows: []dto.StoredItem{
 		sealRow(t, s.VaultKey, s.UserID, "id-1", "id-original", plain),
 		sealRow(t, s.VaultKey, 7, "id-2", "id-2", plain),
 		tampered,

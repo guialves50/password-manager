@@ -3,7 +3,9 @@ package keys
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hkdf"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base32"
 	"errors"
 	"strings"
@@ -23,6 +25,34 @@ var DefaultParams = Params{Time: 3, MemoryKiB: 64 * 1024, Threads: 4}
 
 func Derive(secret, salt []byte, p Params) []byte {
 	return argon2.IDKey(secret, salt, p.Time, p.MemoryKiB, p.Threads, 32)
+}
+
+func Split(master []byte) (auth, enc []byte, err error) {
+	auth, err = hkdf.Key(sha256.New, master, nil, "pm/auth/v1", 32)
+	if err != nil {
+		return nil, nil, err
+	}
+	enc, err = hkdf.Key(sha256.New, master, nil, "pm/enc/v1", 32)
+	if err != nil {
+		return nil, nil, err
+	}
+	return auth, enc, nil
+}
+
+func Wrap(secret, salt []byte, p Params, vaultKey, aad []byte) (blob, authHash []byte, err error) {
+	master := Derive(secret, salt, p)
+	defer Zero(master)
+	authHash, encKey, err := Split(master)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer Zero(encKey)
+	blob, err = Seal(encKey, vaultKey, aad)
+	if err != nil {
+		Zero(authHash)
+		return nil, nil, err
+	}
+	return blob, authHash, nil
 }
 
 func Random(n int) ([]byte, error) {

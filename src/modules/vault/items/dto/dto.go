@@ -9,3 +9,8 @@ type Item struct {
 	URL      string `json:"url"`
 	Notes    string `json:"notes"`
 }
+
+type StoredItem struct {
+	ID   string `json:"id"`
+	Blob []byte `json:"blob"`
+}

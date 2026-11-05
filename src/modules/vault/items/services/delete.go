@@ -8,7 +8,7 @@ import (
 )
 
 type deleter interface {
-	Delete(ctx context.Context, userID uint64, id string) (bool, error)
+	DeleteItem(ctx context.Context, s *cli.Session, id string) (bool, error)
 }
 
 type DeleteService struct {
@@ -16,7 +16,7 @@ type DeleteService struct {
 }
 
 func (d *DeleteService) Delete(ctx context.Context, s *cli.Session, id string) error {
-	ok, err := d.Repo.Delete(ctx, s.UserID, id)
+	ok, err := d.Repo.DeleteItem(ctx, s, id)
 	if err != nil {
 		return err
 	}

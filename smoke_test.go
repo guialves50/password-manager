@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
@@ -15,8 +16,10 @@ import (
 
 	"github.com/guialves50/password-manager/src/cli"
 	"github.com/guialves50/password-manager/src/database"
+	"github.com/guialves50/password-manager/src/modules/auth/keys"
+	"github.com/guialves50/password-manager/src/modules/session"
 	"github.com/guialves50/password-manager/src/modules/user"
-	"gorm.io/gorm"
+	"github.com/guialves50/password-manager/src/server"
 )
 
 func fakePrompter(lines string, secrets ...string) (*cli.Prompter, *bytes.Buffer) {
@@ -37,14 +40,17 @@ func fakePrompter(lines string, secrets ...string) (*cli.Prompter, *bytes.Buffer
 
 func TestSmokeEndToEnd(t *testing.T) {
 	db := database.TestTx(t)
-	connect := func() (*gorm.DB, error) { return db, nil }
+	srv := httptest.NewServer(server.New(db, server.Config{Secret: bytes.Repeat([]byte{1}, 32), AuthParams: keys.Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}}))
+	defer srv.Close()
+	t.Setenv("PM_SERVER", srv.URL)
+	t.Setenv("DATABASE_URL", "postgres://nobody:wrong@127.0.0.1:1/nothing?sslmode=disable&connect_timeout=1")
 	email := fmt.Sprintf("smoke+%d@test.local", time.Now().UnixNano())
 	keyRe := regexp.MustCompile(`chave de recuperação: ([A-Z2-7]{4}(?:-[A-Z2-7]{4}){7})\n`)
 
 	step := func(name string, want int, wantOut string, args []string, lines string, secrets ...string) string {
 		t.Helper()
 		p, out := fakePrompter(lines, secrets...)
-		if code := start(connect, args, p, io.Discard); code != want || !strings.Contains(out.String(), wantOut) {
+		if code := start(args, p, io.Discard); code != want || !strings.Contains(out.String(), wantOut) {
 			t.Fatalf("%s: code %d out %q", name, code, out.String())
 		}
 		return out.String()
@@ -67,8 +73,26 @@ func TestSmokeEndToEnd(t *testing.T) {
 	if len(u.MasterSalt) != 16 || len(u.RecoverySalt) != 16 || len(u.MasterWrappedKey) != 60 || len(u.RecoveryWrappedKey) != 60 {
 		t.Fatalf("lens %d/%d/%d/%d", len(u.MasterSalt), len(u.RecoverySalt), len(u.MasterWrappedKey), len(u.RecoveryWrappedKey))
 	}
+	clientAuth, _, _ := keys.Split(keys.Derive([]byte("SenhaAntiga1"), u.MasterSalt, keys.DefaultParams))
+	if len(u.AuthSalt) != 16 || len(u.AuthHash) != 32 || bytes.Equal(u.AuthHash, clientAuth) || len(u.RecoveryAuthSalt) != 16 || len(u.RecoveryAuthHash) != 32 {
+		t.Fatalf("server stored the auth hash without Argon2id: %x", u.AuthHash)
+	}
 
-	step("login", 0, "pm> ", []string{"login"}, email+"\nexit\n", "SenhaAntiga1")
+	item := "gmail\nalice@gmail.com\nhttps://mail.google.com\nconta pessoal\n"
+	added := "pm> nome: usuário: senha: \nurl: notas: item salvo\n"
+	want := "email: senha mestra: \n" + added +
+		"pm> gmail\n" +
+		"pm> nome: gmail\nusuário: alice@gmail.com\nsenha: S3nhaDoGmail\nurl: https://mail.google.com\nnotas: conta pessoal\n" +
+		"pm> remover gmail? (s/N) item removido\n" +
+		"pm> cofre vazio\n" +
+		"pm> "
+	if out := step("login vault", 0, want, []string{"login"}, email+"\nadd\n"+item+"list\nget GMAIL\ndelete gmail\ns\nlist\nexit\n", "SenhaAntiga1", "S3nhaDoGmail"); out != want {
+		t.Fatalf("login vault: out %q", out)
+	}
+	var sessions int64
+	if err := db.Model(&session.Session{}).Where("user_id = ?", u.ID).Count(&sessions).Error; err != nil || sessions != 0 {
+		t.Fatalf("exit did not log out: %d sessions, %v", sessions, err)
+	}
 
 	out = step("recover", 0, "senha mestra redefinida\n", []string{"recover"}, email+"\n", strings.ToLower(oldKey), "SenhaNova1", "SenhaNova1")
 	m = keyRe.FindStringSubmatch(out)
@@ -80,18 +104,6 @@ func TestSmokeEndToEnd(t *testing.T) {
 	step("login old", 1, "email ou senha mestra inválidos\n", []string{"login"}, email+"\n", "SenhaAntiga1")
 	step("recover old key", 1, "email ou chave de recuperação inválidos\n", []string{"recover"}, email+"\n", oldKey, "SenhaOutra1", "SenhaOutra1")
 	step("recover new key", 0, "senha mestra redefinida\n", []string{"recover"}, email+"\n", m[1], "SenhaOutra1", "SenhaOutra1")
-
-	item := "gmail\nalice@gmail.com\nhttps://mail.google.com\nconta pessoal\n"
-	added := "pm> nome: usuário: senha: \nurl: notas: item salvo\n"
-	want := "email: senha mestra: \n" + added +
-		"pm> gmail\n" +
-		"pm> nome: gmail\nusuário: alice@gmail.com\nsenha: S3nhaDoGmail\nurl: https://mail.google.com\nnotas: conta pessoal\n" +
-		"pm> remover gmail? (s/N) item removido\n" +
-		"pm> cofre vazio\n" +
-		"pm> "
-	if out := step("vault", 0, want, []string{"login"}, email+"\nadd\n"+item+"list\nget GMAIL\ndelete gmail\ns\nlist\nexit\n", "SenhaOutra1", "S3nhaDoGmail"); out != want {
-		t.Fatalf("vault: out %q", out)
-	}
 
 	want = "email: senha mestra: \n" + added + "pm> "
 	if out := step("vault add again", 0, want, []string{"login"}, email+"\nadd\n"+item+"exit\n", "SenhaOutra1", "S3nhaDoGmail"); out != want {

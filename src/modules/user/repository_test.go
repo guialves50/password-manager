@@ -3,6 +3,7 @@
 package user_test
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -18,6 +19,8 @@ func seed(t *testing.T, db *gorm.DB, email string) *user.User {
 		Email: email, KDFTime: 3, KDFMemoryKiB: 65536, KDFThreads: 4,
 		MasterSalt: []byte("s"), MasterWrappedKey: []byte("m"),
 		RecoverySalt: []byte("r"), RecoveryWrappedKey: []byte("k"),
+		AuthSalt: []byte("as"), AuthHash: []byte("ah"),
+		RecoveryAuthSalt: []byte("ras"), RecoveryAuthHash: []byte("rah"),
 	}
 	if err := db.Create(u).Error; err != nil {
 		t.Fatalf("seed: %v", err)
@@ -50,15 +53,15 @@ func TestFindByEmail(t *testing.T) {
 	}
 }
 
-func TestRecordFailureLocksOnFifth(t *testing.T) {
+func TestAttemptLocksOnFifth(t *testing.T) {
 	db := database.TestTx(t)
 	repo := user.NewRepository(db)
 	ctx := context.Background()
 	u := seed(t, db, "lock@example.com")
 
 	for i := 1; i <= 4; i++ {
-		if err := repo.RecordFailure(ctx, u.ID); err != nil {
-			t.Fatal(err)
+		if ok, err := repo.Attempt(ctx, u.ID); err != nil || !ok {
+			t.Fatal(ok, err)
 		}
 	}
 	got := reload(t, db, u.ID)
@@ -67,8 +70,8 @@ func TestRecordFailureLocksOnFifth(t *testing.T) {
 	}
 
 	before := time.Now()
-	if err := repo.RecordFailure(ctx, u.ID); err != nil {
-		t.Fatal(err)
+	if ok, err := repo.Attempt(ctx, u.ID); err != nil || !ok {
+		t.Fatal(ok, err)
 	}
 	got = reload(t, db, u.ID)
 	if got.FailedAttempts != 5 || got.LockedUntil == nil {
@@ -79,6 +82,13 @@ func TestRecordFailureLocksOnFifth(t *testing.T) {
 	}
 	if got.LockedFor(time.Now()) <= 14*time.Minute {
 		t.Fatalf("LockedFor = %v", got.LockedFor(time.Now()))
+	}
+
+	if ok, err := repo.Attempt(ctx, u.ID); err != nil || ok {
+		t.Fatalf("attempt while locked: ok=%v err=%v", ok, err)
+	}
+	if got := reload(t, db, u.ID); got.FailedAttempts != 5 {
+		t.Fatalf("locked attempt counted: %d", got.FailedAttempts)
 	}
 
 	if err := repo.ResetFailures(ctx, u.ID); err != nil {
@@ -96,13 +106,15 @@ func TestEmailMustBeLowercase(t *testing.T) {
 		Email: "Upper@example.com", KDFTime: 3, KDFMemoryKiB: 65536, KDFThreads: 4,
 		MasterSalt: []byte("s"), MasterWrappedKey: []byte("m"),
 		RecoverySalt: []byte("r"), RecoveryWrappedKey: []byte("k"),
+		AuthSalt: []byte("as"), AuthHash: []byte("ah"),
+		RecoveryAuthSalt: []byte("ras"), RecoveryAuthHash: []byte("rah"),
 	}
 	if err := db.Create(u).Error; err == nil {
 		t.Fatal("uppercase email accepted")
 	}
 }
 
-func TestRecordFailureRestartsAfterExpiredLock(t *testing.T) {
+func TestAttemptRestartsAfterExpiredLock(t *testing.T) {
 	db := database.TestTx(t)
 	repo := user.NewRepository(db)
 	ctx := context.Background()
@@ -111,8 +123,8 @@ func TestRecordFailureRestartsAfterExpiredLock(t *testing.T) {
 	fail := func(n int) user.User {
 		t.Helper()
 		for range n {
-			if err := repo.RecordFailure(ctx, u.ID); err != nil {
-				t.Fatal(err)
+			if ok, err := repo.Attempt(ctx, u.ID); err != nil || !ok {
+				t.Fatal(ok, err)
 			}
 		}
 		return reload(t, db, u.ID)
@@ -129,5 +141,39 @@ func TestRecordFailureRestartsAfterExpiredLock(t *testing.T) {
 	}
 	if got := fail(4); got.FailedAttempts != 5 || got.LockedFor(time.Now()) <= 14*time.Minute {
 		t.Fatalf("after 4 more: attempts=%d locked=%v", got.FailedAttempts, got.LockedUntil)
+	}
+}
+
+func TestAuthHashColumnsRoundTrip(t *testing.T) {
+	db := database.TestTx(t)
+	for _, col := range []string{"auth_salt", "auth_hash", "recovery_auth_salt", "recovery_auth_hash"} {
+		if !db.Migrator().HasColumn(&user.User{}, col) {
+			t.Fatalf("missing column %s", col)
+		}
+	}
+	u := &user.User{
+		Email: "hashes@example.com", KDFTime: 3, KDFMemoryKiB: 65536, KDFThreads: 4,
+		MasterSalt: []byte("s"), MasterWrappedKey: []byte("m"),
+		RecoverySalt: []byte("r"), RecoveryWrappedKey: []byte("k"),
+		AuthSalt: []byte("as"), AuthHash: []byte("ah"),
+		RecoveryAuthSalt: []byte("ras"), RecoveryAuthHash: []byte("rah"),
+	}
+	if err := db.Create(u).Error; err != nil {
+		t.Fatal(err)
+	}
+	got := reload(t, db, u.ID)
+	if !bytes.Equal(got.AuthSalt, []byte("as")) || !bytes.Equal(got.AuthHash, []byte("ah")) ||
+		!bytes.Equal(got.RecoveryAuthSalt, []byte("ras")) || !bytes.Equal(got.RecoveryAuthHash, []byte("rah")) {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestAuthHashColumnsNotNull(t *testing.T) {
+	db := database.TestTx(t)
+	for _, col := range []string{"auth_salt", "auth_hash", "recovery_auth_salt", "recovery_auth_hash"} {
+		var nullable string
+		if err := db.Raw("SELECT is_nullable FROM information_schema.columns WHERE table_name = 'users' AND column_name = ?", col).Scan(&nullable).Error; err != nil || nullable != "NO" {
+			t.Errorf("%s nullable %q, %v", col, nullable, err)
+		}
 	}
 }

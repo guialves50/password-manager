@@ -13,16 +13,16 @@ import (
 	"github.com/guialves50/password-manager/src/cli"
 	autherrors "github.com/guialves50/password-manager/src/modules/auth/errors"
 	"github.com/guialves50/password-manager/src/modules/auth/keys"
+	"github.com/guialves50/password-manager/src/modules/auth/register/dto"
 	"github.com/guialves50/password-manager/src/modules/auth/register/services"
-	"github.com/guialves50/password-manager/src/modules/user"
 )
 
-type fakeRepo struct {
+type fakeAPI struct {
 	calls int
 	err   error
 }
 
-func (f *fakeRepo) Create(context.Context, *user.User) error {
+func (f *fakeAPI) Register(context.Context, dto.Request) error {
 	f.calls++
 	return f.err
 }
@@ -43,12 +43,12 @@ func prompter(line string, secrets ...string) (*cli.Prompter, *bytes.Buffer) {
 	}, &out
 }
 
-func command(repo *fakeRepo) cli.Command {
-	return New(&services.Service{Repo: repo, Params: keys.Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}})
+func command(repo *fakeAPI) cli.Command {
+	return New((&services.Service{API: repo, Params: keys.Params{Time: 1, MemoryKiB: 8 * 1024, Threads: 1}}).Register)
 }
 
 func TestRegisterHappyPath(t *testing.T) {
-	repo := &fakeRepo{}
+	repo := &fakeAPI{}
 	p, out := prompter("alice@example.com\n", "SenhaForte1", "SenhaForte1")
 	if err := command(repo)(context.Background(), p); err != nil {
 		t.Fatal(err)
@@ -87,7 +87,7 @@ func TestRegisterErrors(t *testing.T) {
 		{"eof confirm", "a@example.com\n", []string{"SenhaForte1"}, nil, "operação cancelada\n"},
 	}
 	for _, c := range cases {
-		repo := &fakeRepo{err: c.repoErr}
+		repo := &fakeAPI{err: c.repoErr}
 		p, out := prompter(c.line, c.secrets...)
 		err := command(repo)(context.Background(), p)
 		s := out.String()

@@ -3,25 +3,23 @@ package services
 import (
 	"bytes"
 	"context"
-	"time"
+	"errors"
 
 	autherrors "github.com/guialves50/password-manager/src/modules/auth/errors"
 	"github.com/guialves50/password-manager/src/modules/auth/keys"
 	"github.com/guialves50/password-manager/src/modules/auth/policy"
+	prelogin "github.com/guialves50/password-manager/src/modules/auth/prelogin/dto"
 	"github.com/guialves50/password-manager/src/modules/auth/recover/dto"
-	"github.com/guialves50/password-manager/src/modules/user"
 )
 
-type userStore interface {
-	FindByEmail(ctx context.Context, email string) (*user.User, error)
-	RecordFailure(ctx context.Context, id uint64) error
-	RotateKeys(ctx context.Context, id uint64, verifiedRecoveryBlob, masterSalt, masterBlob, recoverySalt, recoveryBlob []byte) error
+type recoverAPI interface {
+	Prelogin(ctx context.Context, email string) (prelogin.Response, error)
+	RecoverStart(ctx context.Context, req dto.StartRequest) (dto.StartResponse, error)
+	RecoverFinish(ctx context.Context, req dto.FinishRequest) error
 }
 
 type Service struct {
-	Repo   userStore
-	Params keys.Params
-	Derive func(secret, salt []byte, p keys.Params) []byte
+	API recoverAPI
 }
 
 func (s *Service) Recover(ctx context.Context, in dto.Input) (dto.Output, error) {
@@ -41,28 +39,30 @@ func (s *Service) Recover(ctx context.Context, in dto.Input) (dto.Output, error)
 
 	email, err := policy.NormalizeEmail(in.Email)
 	if err != nil {
-		return dto.Output{}, s.dummy(secret)
+		return dto.Output{}, autherrors.ErrInvalidRecovery
 	}
-	u, err := s.Repo.FindByEmail(ctx, email)
+	pre, err := s.API.Prelogin(ctx, email)
 	if err != nil {
 		return dto.Output{}, err
 	}
-	if u == nil {
-		return dto.Output{}, s.dummy(secret)
-	}
-	if d := u.LockedFor(time.Now()); d > 0 {
-		return dto.Output{}, &autherrors.LockedError{Minutes: int((d + time.Minute - 1) / time.Minute)}
-	}
+	params := keys.Params{Time: pre.KDF.Time, MemoryKiB: pre.KDF.MemoryKiB, Threads: pre.KDF.Threads}
 
-	params := keys.Params{Time: u.KDFTime, MemoryKiB: u.KDFMemoryKiB, Threads: u.KDFThreads}
-	oldKEK := s.Derive(secret, u.RecoverySalt, params)
-	defer keys.Zero(oldKEK)
-	vaultKey, err := keys.Open(oldKEK, u.RecoveryWrappedKey, []byte("pm/recovery/v1|"+u.Email))
+	recMaster := keys.Derive(secret, pre.RecoverySalt, params)
+	defer keys.Zero(recMaster)
+	recAuth, recEnc, err := keys.Split(recMaster)
 	if err != nil {
-		if err := s.Repo.RecordFailure(ctx, u.ID); err != nil {
-			return dto.Output{}, err
-		}
-		return dto.Output{}, autherrors.ErrInvalidRecovery
+		return dto.Output{}, err
+	}
+	defer keys.Zero(recAuth)
+	defer keys.Zero(recEnc)
+
+	start, err := s.API.RecoverStart(ctx, dto.StartRequest{Email: email, RecoveryAuthHash: recAuth})
+	if err != nil {
+		return dto.Output{}, err
+	}
+	vaultKey, err := keys.Open(recEnc, start.RecoveryBlob, []byte("pm/recovery/v1|"+email))
+	if err != nil {
+		return dto.Output{}, errors.New("recover: recovery blob does not open with the derived key")
 	}
 	defer keys.Zero(vaultKey)
 
@@ -81,26 +81,29 @@ func (s *Service) Recover(ctx context.Context, in dto.Input) (dto.Output, error)
 	newSecret := keys.NormalizeRecoveryKey([]byte(recoveryKey))
 	defer keys.Zero(newSecret)
 
-	masterKEK := s.Derive(in.Password, masterSalt, params)
-	defer keys.Zero(masterKEK)
-	recoveryKEK := s.Derive(newSecret, recoverySalt, params)
-	defer keys.Zero(recoveryKEK)
+	masterBlob, authHash, err := keys.Wrap(in.Password, masterSalt, params, vaultKey, []byte("pm/master/v1|"+email))
+	if err != nil {
+		return dto.Output{}, err
+	}
+	defer keys.Zero(authHash)
+	recoveryBlob, newRecAuth, err := keys.Wrap(newSecret, recoverySalt, params, vaultKey, []byte("pm/recovery/v1|"+email))
+	if err != nil {
+		return dto.Output{}, err
+	}
+	defer keys.Zero(newRecAuth)
 
-	masterBlob, err := keys.Seal(masterKEK, vaultKey, []byte("pm/master/v1|"+u.Email))
+	err = s.API.RecoverFinish(ctx, dto.FinishRequest{
+		Email:               email,
+		RecoveryAuthHash:    recAuth,
+		MasterSalt:          masterSalt,
+		MasterBlob:          masterBlob,
+		AuthHash:            authHash,
+		RecoverySalt:        recoverySalt,
+		RecoveryBlob:        recoveryBlob,
+		NewRecoveryAuthHash: newRecAuth,
+	})
 	if err != nil {
-		return dto.Output{}, err
-	}
-	recoveryBlob, err := keys.Seal(recoveryKEK, vaultKey, []byte("pm/recovery/v1|"+u.Email))
-	if err != nil {
-		return dto.Output{}, err
-	}
-	if err := s.Repo.RotateKeys(ctx, u.ID, u.RecoveryWrappedKey, masterSalt, masterBlob, recoverySalt, recoveryBlob); err != nil {
 		return dto.Output{}, err
 	}
 	return dto.Output{RecoveryKey: recoveryKey}, nil
-}
-
-func (s *Service) dummy(secret []byte) error {
-	keys.Zero(s.Derive(secret, make([]byte, 16), s.Params))
-	return autherrors.ErrInvalidRecovery
 }

@@ -2,6 +2,8 @@ package keys
 
 import (
 	"bytes"
+	"crypto/hkdf"
+	"crypto/sha256"
 	"regexp"
 	"testing"
 )
@@ -116,5 +118,55 @@ func TestSealNoncesUnique(t *testing.T) {
 	}
 	if bytes.Equal(a[:12], b[:12]) || bytes.Equal(a, b) {
 		t.Fatal("nonce reused")
+	}
+}
+
+func TestSplit(t *testing.T) {
+	master, _ := Random(32)
+	auth, enc, err := Split(master)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(auth) != 32 || len(enc) != 32 {
+		t.Fatalf("lens %d %d", len(auth), len(enc))
+	}
+	if bytes.Equal(auth, enc) {
+		t.Fatal("auth == enc")
+	}
+	auth2, enc2, _ := Split(master)
+	if !bytes.Equal(auth, auth2) || !bytes.Equal(enc, enc2) {
+		t.Fatal("not deterministic")
+	}
+	wantAuth, _ := hkdf.Key(sha256.New, master, nil, "pm/auth/v1", 32)
+	wantEnc, _ := hkdf.Key(sha256.New, master, nil, "pm/enc/v1", 32)
+	if !bytes.Equal(auth, wantAuth) || !bytes.Equal(enc, wantEnc) {
+		t.Fatal("labels swapped or wrong")
+	}
+	other, _ := Random(32)
+	if a, _, _ := Split(other); bytes.Equal(a, auth) {
+		t.Fatal("same auth for different master")
+	}
+}
+
+func TestWrap(t *testing.T) {
+	p := cheap
+	salt := bytes.Repeat([]byte{1}, 16)
+	vk := bytes.Repeat([]byte{9}, 32)
+	blob, auth, err := Wrap([]byte("SenhaForte1"), salt, p, vk, []byte("aad"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAuth, enc, _ := Split(Derive([]byte("SenhaForte1"), salt, p))
+	if !bytes.Equal(auth, wantAuth) || len(blob) != 60 {
+		t.Fatalf("auth %x blob %d", auth, len(blob))
+	}
+	if got, err := Open(enc, blob, []byte("aad")); err != nil || !bytes.Equal(got, vk) {
+		t.Fatalf("open with enc key: %x, %v", got, err)
+	}
+	if _, err := Open(Derive([]byte("SenhaForte1"), salt, p), blob, []byte("aad")); err == nil {
+		t.Fatal("blob opens with the master key itself")
+	}
+	if _, err := Open(enc, blob, []byte("other")); err == nil {
+		t.Fatal("blob opens with another aad")
 	}
 }

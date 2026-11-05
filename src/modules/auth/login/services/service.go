@@ -2,26 +2,23 @@ package services
 
 import (
 	"context"
-	"time"
+	"errors"
 
 	"github.com/guialves50/password-manager/src/cli"
 	autherrors "github.com/guialves50/password-manager/src/modules/auth/errors"
 	"github.com/guialves50/password-manager/src/modules/auth/keys"
 	"github.com/guialves50/password-manager/src/modules/auth/login/dto"
 	"github.com/guialves50/password-manager/src/modules/auth/policy"
-	"github.com/guialves50/password-manager/src/modules/user"
+	prelogin "github.com/guialves50/password-manager/src/modules/auth/prelogin/dto"
 )
 
-type userStore interface {
-	FindByEmail(ctx context.Context, email string) (*user.User, error)
-	RecordFailure(ctx context.Context, id uint64) error
-	ResetFailures(ctx context.Context, id uint64) error
+type authAPI interface {
+	Prelogin(ctx context.Context, email string) (prelogin.Response, error)
+	Login(ctx context.Context, req dto.Request) (dto.Response, error)
 }
 
 type Service struct {
-	Repo   userStore
-	Params keys.Params
-	Derive func(secret, salt []byte, p keys.Params) []byte
+	API authAPI
 }
 
 func (s *Service) Login(ctx context.Context, in dto.Input) (*cli.Session, error) {
@@ -29,36 +26,28 @@ func (s *Service) Login(ctx context.Context, in dto.Input) (*cli.Session, error)
 
 	email, err := policy.NormalizeEmail(in.Email)
 	if err != nil {
-		return nil, s.dummy(in.Password)
-	}
-	u, err := s.Repo.FindByEmail(ctx, email)
-	if err != nil {
-		return nil, err
-	}
-	if u == nil {
-		return nil, s.dummy(in.Password)
-	}
-	if d := u.LockedFor(time.Now()); d > 0 {
-		return nil, &autherrors.LockedError{Minutes: int((d + time.Minute - 1) / time.Minute)}
-	}
-
-	kek := s.Derive(in.Password, u.MasterSalt, keys.Params{Time: u.KDFTime, MemoryKiB: u.KDFMemoryKiB, Threads: u.KDFThreads})
-	defer keys.Zero(kek)
-	vaultKey, err := keys.Open(kek, u.MasterWrappedKey, []byte("pm/master/v1|"+u.Email))
-	if err != nil {
-		if err := s.Repo.RecordFailure(ctx, u.ID); err != nil {
-			return nil, err
-		}
 		return nil, autherrors.ErrInvalidCredentials
 	}
-	if err := s.Repo.ResetFailures(ctx, u.ID); err != nil {
-		keys.Zero(vaultKey)
+	pre, err := s.API.Prelogin(ctx, email)
+	if err != nil {
 		return nil, err
 	}
-	return &cli.Session{UserID: u.ID, Email: u.Email, VaultKey: vaultKey}, nil
-}
+	master := keys.Derive(in.Password, pre.MasterSalt, keys.Params{Time: pre.KDF.Time, MemoryKiB: pre.KDF.MemoryKiB, Threads: pre.KDF.Threads})
+	defer keys.Zero(master)
+	authHash, encKey, err := keys.Split(master)
+	if err != nil {
+		return nil, err
+	}
+	defer keys.Zero(authHash)
+	defer keys.Zero(encKey)
 
-func (s *Service) dummy(password []byte) error {
-	keys.Zero(s.Derive(password, make([]byte, 16), s.Params))
-	return autherrors.ErrInvalidCredentials
+	res, err := s.API.Login(ctx, dto.Request{Email: email, AuthHash: authHash})
+	if err != nil {
+		return nil, err
+	}
+	vaultKey, err := keys.Open(encKey, res.MasterBlob, []byte("pm/master/v1|"+email))
+	if err != nil {
+		return nil, errors.New("login: master blob does not open with the derived key")
+	}
+	return &cli.Session{UserID: res.UserID, Email: email, VaultKey: vaultKey, Token: res.Token}, nil
 }

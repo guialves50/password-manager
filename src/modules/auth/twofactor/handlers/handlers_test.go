@@ -155,4 +155,3 @@ func TestConfirmIPLockedAfterThreeWrongCodes(t *testing.T) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 }
-

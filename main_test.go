@@ -199,3 +199,16 @@ func TestHomeDispatchesUntilExit(t *testing.T) {
 		t.Fatalf("EOF: calls %d", calls)
 	}
 }
+
+func TestServerConfigDisables2FAWithoutSecret(t *testing.T) {
+	t.Setenv("PM_SERVER_SECRET", "")
+	cfg, err := serverConfig(io.Discard)
+	if err != nil || !cfg.Ephemeral || len(cfg.Secret) != 32 {
+		t.Fatalf("unset: ephemeral %v secret %d err %v", cfg.Ephemeral, len(cfg.Secret), err)
+	}
+	t.Setenv("PM_SERVER_SECRET", strings.Repeat("ab", 32))
+	cfg, err = serverConfig(io.Discard)
+	if err != nil || cfg.Ephemeral || !bytes.Equal(cfg.Secret, bytes.Repeat([]byte{0xab}, 32)) || cfg.AuthParams.Time == 0 {
+		t.Fatalf("set: ephemeral %v err %v", cfg.Ephemeral, err)
+	}
+}

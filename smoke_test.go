@@ -121,7 +121,7 @@ func TestSmokeEndToEnd(t *testing.T) {
 		t.Fatal("no password in get")
 	}
 	secret := got[1]
-	if len(secret) != 32 || secret == first {
+	if len(secret) != 32 || secret == first || !allClasses(secret) || !allClasses(first) {
 		t.Fatalf("second password %q (first %q)", secret, first)
 	}
 
@@ -170,4 +170,18 @@ func TestSmokeEndToEnd(t *testing.T) {
 	if out := step("moved blob", 0, want, []string{"login"}, email2+"\nlist\nexit\n", "SenhaSegunda1"); out != want {
 		t.Fatalf("moved blob: out %q", out)
 	}
+
+	third := getRe.FindStringSubmatch(step("default length again", 0, "item salvo\n", []string{"login"}, email2+"\nadd\nterceiro\n\n\n\n\nget terceiro\nexit\n", "SenhaSegunda1"))
+	if third == nil || len(third[1]) != 20 || third[1] == first || !allClasses(third[1]) {
+		t.Fatalf("third password %v (first %q)", third, first)
+	}
+}
+
+func allClasses(pw string) bool {
+	for _, class := range []string{"ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz", "0123456789", "!@#$%^&*()-_=+[]{};:,.?/"} {
+		if !strings.ContainsAny(pw, class) {
+			return false
+		}
+	}
+	return true
 }

@@ -3,18 +3,22 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/guialves50/password-manager/src/cli"
-	"github.com/guialves50/password-manager/src/modules/auth/keys"
 	vaulterrors "github.com/guialves50/password-manager/src/modules/vault/errors"
+	"github.com/guialves50/password-manager/src/modules/vault/generator"
 	"github.com/guialves50/password-manager/src/modules/vault/items/dto"
 )
 
 type AddFunc func(ctx context.Context, s *cli.Session, in dto.Item) (int, error)
 
-func NewAdd(add AddFunc) cli.SessionCommand {
+type GenerateFunc func(n int) (string, error)
+
+func NewAdd(add AddFunc, gen GenerateFunc) cli.SessionCommand {
 	return func(ctx context.Context, p *cli.Prompter, s *cli.Session, _ string) error {
-		in, err := readItem(p)
+		in, err := readItem(p, gen)
 		skipped := 0
 		if err == nil {
 			skipped, err = add(ctx, s, in)
@@ -31,7 +35,7 @@ func NewAdd(add AddFunc) cli.SessionCommand {
 	}
 }
 
-func readItem(p *cli.Prompter) (dto.Item, error) {
+func readItem(p *cli.Prompter, gen GenerateFunc) (dto.Item, error) {
 	var in dto.Item
 	var err error
 	if in.Name, err = p.Line("nome: "); err != nil {
@@ -40,10 +44,17 @@ func readItem(p *cli.Prompter) (dto.Item, error) {
 	if in.Username, err = p.Line("usuário: "); err != nil {
 		return in, err
 	}
-	pw, err := p.Secret("senha: ")
-	in.Password = string(pw)
-	keys.Zero(pw)
+	length, err := p.Line("comprimento (20): ")
 	if err != nil {
+		return in, err
+	}
+	n := generator.Default
+	if length = strings.TrimSpace(length); length != "" {
+		if n, err = strconv.Atoi(length); err != nil {
+			return in, vaulterrors.ErrGenLength
+		}
+	}
+	if in.Password, err = gen(n); err != nil {
 		return in, err
 	}
 	if in.URL, err = p.Line("url: "); err != nil {

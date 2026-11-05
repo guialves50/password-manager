@@ -15,9 +15,10 @@ var (
 	ErrNameTaken      = errors.New("já existe um item com esse nome")
 	ErrNotFound       = errors.New("item não encontrado")
 	ErrInvalidText    = errors.New("o item contém texto que não é UTF-8 válido")
+	ErrGenLength      = errors.New("o comprimento deve ser um número entre 8 e 128")
 )
 
-var known = []error{ErrNameLength, ErrPasswordLength, ErrUsernameLength, ErrURLLength, ErrNotesLength, ErrNameTaken, ErrNotFound, ErrInvalidText}
+var known = []error{ErrNameLength, ErrPasswordLength, ErrUsernameLength, ErrURLLength, ErrNotesLength, ErrNameTaken, ErrNotFound, ErrInvalidText, ErrGenLength}
 
 func Message(err error) string {
 	for _, k := range known {

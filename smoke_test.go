@@ -78,16 +78,21 @@ func TestSmokeEndToEnd(t *testing.T) {
 		t.Fatalf("server stored the auth hash without Argon2id: %x", u.AuthHash)
 	}
 
-	item := "gmail\nalice@gmail.com\nhttps://mail.google.com\nconta pessoal\n"
-	added := "pm> nome: usuário: senha: \nurl: notas: item salvo\n"
-	want := "email: senha mestra: \n" + added +
-		"pm> gmail\n" +
-		"pm> nome: gmail\nusuário: alice@gmail.com\nsenha: S3nhaDoGmail\nurl: https://mail.google.com\nnotas: conta pessoal\n" +
-		"pm> remover gmail? (s/N) item removido\n" +
-		"pm> cofre vazio\n" +
-		"pm> "
-	if out := step("login vault", 0, want, []string{"login"}, email+"\nadd\n"+item+"list\nget GMAIL\ndelete gmail\ns\nlist\nexit\n", "SenhaAntiga1", "S3nhaDoGmail"); out != want {
+	item := "gmail\nalice@gmail.com\n\nhttps://mail.google.com\nconta pessoal\n"
+	added := "pm> nome: usuário: comprimento (20): url: notas: item salvo\n"
+	wantRe := regexp.MustCompile("^" + regexp.QuoteMeta("email: senha mestra: \n"+added+
+		"pm> gmail\n"+
+		"pm> nome: gmail\nusuário: alice@gmail.com\nsenha: ") + `([A-Za-z0-9!@#$%^&*()\-_=+\[\]{};:,.?/]{20})` + regexp.QuoteMeta("\nurl: https://mail.google.com\nnotas: conta pessoal\n"+
+		"pm> remover gmail? (s/N) item removido\n"+
+		"pm> cofre vazio\n"+
+		"pm> ") + "$")
+	out = step("login vault", 0, added, []string{"login"}, email+"\nadd\n"+item+"list\nget GMAIL\ndelete gmail\ns\nlist\nexit\n", "SenhaAntiga1")
+	if wantRe.FindStringSubmatch(out) == nil {
 		t.Fatalf("login vault: out %q", out)
+	}
+	first := wantRe.FindStringSubmatch(out)[1]
+	if strings.Count(out, first) != 1 {
+		t.Fatal("generated password printed outside get")
 	}
 	var sessions int64
 	if err := db.Model(&session.Session{}).Where("user_id = ?", u.ID).Count(&sessions).Error; err != nil || sessions != 0 {
@@ -105,9 +110,19 @@ func TestSmokeEndToEnd(t *testing.T) {
 	step("recover old key", 1, "email ou chave de recuperação inválidos\n", []string{"recover"}, email+"\n", oldKey, "SenhaOutra1", "SenhaOutra1")
 	step("recover new key", 0, "senha mestra redefinida\n", []string{"recover"}, email+"\n", m[1], "SenhaOutra1", "SenhaOutra1")
 
-	want = "email: senha mestra: \n" + added + "pm> "
-	if out := step("vault add again", 0, want, []string{"login"}, email+"\nadd\n"+item+"exit\n", "SenhaOutra1", "S3nhaDoGmail"); out != want {
+	want := "email: senha mestra: \n" + added + "pm> "
+	item32 := strings.Replace(item, "\n\n", "\n32\n", 1)
+	if out := step("vault add again", 0, want, []string{"login"}, email+"\nadd\n"+item32+"exit\n", "SenhaOutra1"); out != want {
 		t.Fatalf("vault add again: out %q", out)
+	}
+	getRe := regexp.MustCompile(`senha: (\S+)\n`)
+	got := getRe.FindStringSubmatch(step("vault get again", 0, "senha: ", []string{"login"}, email+"\nget gmail\nexit\n", "SenhaOutra1"))
+	if got == nil {
+		t.Fatal("no password in get")
+	}
+	secret := got[1]
+	if len(secret) != 32 || secret == first || !allClasses(secret) || !allClasses(first) {
+		t.Fatalf("second password %q (first %q)", secret, first)
 	}
 
 	rows, err := db.Raw("SELECT * FROM vault_items").Rows()
@@ -135,7 +150,7 @@ func TestSmokeEndToEnd(t *testing.T) {
 	if err := rows.Close(); err != nil || mine != 1 {
 		t.Fatalf("rows for user: %d, %v", mine, err)
 	}
-	for _, field := range []string{"gmail", "alice@gmail.com", "S3nhaDoGmail", "https://mail.google.com", "conta pessoal"} {
+	for _, field := range []string{"gmail", "alice@gmail.com", secret, "https://mail.google.com", "conta pessoal"} {
 		if bytes.Contains(dump.Bytes(), []byte(field)) {
 			t.Fatalf("vault_items dump contains %q in clear", field)
 		}
@@ -155,4 +170,18 @@ func TestSmokeEndToEnd(t *testing.T) {
 	if out := step("moved blob", 0, want, []string{"login"}, email2+"\nlist\nexit\n", "SenhaSegunda1"); out != want {
 		t.Fatalf("moved blob: out %q", out)
 	}
+
+	third := getRe.FindStringSubmatch(step("default length again", 0, "item salvo\n", []string{"login"}, email2+"\nadd\nterceiro\n\n\n\n\nget terceiro\nexit\n", "SenhaSegunda1"))
+	if third == nil || len(third[1]) != 20 || third[1] == first || !allClasses(third[1]) {
+		t.Fatalf("third password %v (first %q)", third, first)
+	}
+}
+
+func allClasses(pw string) bool {
+	for _, class := range []string{"ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz", "0123456789", "!@#$%^&*()-_=+[]{};:,.?/"} {
+		if !strings.ContainsAny(pw, class) {
+			return false
+		}
+	}
+	return true
 }

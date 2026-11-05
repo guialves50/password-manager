@@ -17,6 +17,7 @@ func TestMessages(t *testing.T) {
 		ErrNameTaken:      "já existe um item com esse nome",
 		ErrNotFound:       "item não encontrado",
 		ErrInvalidText:    "o item contém texto que não é UTF-8 válido",
+		ErrGenLength:      "o comprimento deve ser um número entre 8 e 128",
 	}
 	for err, want := range cases {
 		if got := err.Error(); got != want {

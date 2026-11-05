@@ -138,7 +138,7 @@ func serve(connect func() (*gorm.DB, error), stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "não foi possível preparar o banco de dados")
 		return 1
 	}
-	srv.Handler = server.New(db, server.Config{Secret: secret, AuthParams: keys.DefaultParams})
+	srv.Handler = server.New(db, server.Config{Secret: secret, AuthParams: keys.DefaultParams, Ephemeral: os.Getenv("PM_SERVER_SECRET") == ""})
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		fmt.Fprintln(stderr, "não foi possível escutar em", addr)
@@ -157,7 +157,7 @@ func serve(connect func() (*gorm.DB, error), stdout, stderr io.Writer) int {
 func serverSecret(stderr io.Writer) ([]byte, error) {
 	h := os.Getenv("PM_SERVER_SECRET")
 	if h == "" {
-		fmt.Fprintln(stderr, "aviso: PM_SERVER_SECRET não definido; respostas de pré-login para emails não cadastrados mudam a cada reinício e contas com 2FA não conseguem logar após reiniciar (use recover)")
+		fmt.Fprintln(stderr, "aviso: PM_SERVER_SECRET não definido; respostas de pré-login para emails não cadastrados mudam a cada reinício e o 2FA fica indisponível")
 		return keys.Random(32)
 	}
 	b, err := hex.DecodeString(h)

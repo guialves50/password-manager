@@ -30,6 +30,9 @@ type Config struct {
 	Secret     []byte
 	AuthParams keys.Params
 	Now        func() time.Time
+	// Ephemeral means Secret is random per process (PM_SERVER_SECRET unset):
+	// 2FA is refused, since secrets sealed under it die with the process.
+	Ephemeral bool
 }
 
 func New(db *gorm.DB, cfg Config) http.Handler {
@@ -42,9 +45,12 @@ func New(db *gorm.DB, cfg Config) http.Handler {
 	vault := itemsrepo.New(db)
 	auth := session.Require(sessions, now)
 	kdf := httpx.Gate(MaxDerivations)
-	totpKey, err := hkdf.Key(sha256.New, cfg.Secret, nil, "pm/totp/v1", 32)
-	if err != nil {
-		panic(err)
+	var totpKey []byte
+	if !cfg.Ephemeral {
+		var err error
+		if totpKey, err = hkdf.Key(sha256.New, cfg.Secret, nil, "pm/totp/v1", 32); err != nil {
+			panic(err)
+		}
 	}
 	check := &totp.Checker{Users: users, Limiter: totp.NewLimiter(now), Key: totpKey, Now: now}
 

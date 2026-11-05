@@ -142,7 +142,7 @@ func listening(t *testing.T, stderr io.Writer) string {
 func TestServeHTTP(t *testing.T) {
 	var stderr bytes.Buffer
 	addr := listening(t, &stderr)
-	if !strings.HasPrefix(stderr.String(), "aviso: PM_SERVER_SECRET não definido") || !strings.Contains(stderr.String(), "contas com 2FA não conseguem logar após reiniciar") {
+	if !strings.HasPrefix(stderr.String(), "aviso: PM_SERVER_SECRET não definido") || !strings.Contains(stderr.String(), "o 2FA fica indisponível") {
 		t.Fatalf("no secret warning: %q", stderr.String())
 	}
 	res, err := http.Post("http://"+addr+"/logout", "application/json", nil)

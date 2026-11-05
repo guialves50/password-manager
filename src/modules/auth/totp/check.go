@@ -12,7 +12,12 @@ import (
 	"github.com/guialves50/password-manager/src/server/httpx"
 )
 
-var ErrInvalid = errors.New("totp: invalid code")
+var (
+	ErrInvalid = errors.New("totp: invalid code")
+	// ErrUnreadable: the stored secret doesn't open under this server's key
+	// (PM_SERVER_SECRET changed or unset). Not the user's guess, so not counted.
+	ErrUnreadable = errors.New("totp: stored secret unreadable")
+)
 
 type attempter interface {
 	TOTPAttempt(ctx context.Context, id uint64, now time.Time) (bool, error)
@@ -35,6 +40,11 @@ func (c *Checker) Check(ctx context.Context, u *user.User, blob []byte, code, ip
 	if u.TOTPLockedUntil != nil && u.TOTPLockedUntil.After(now) {
 		return 0, locked(u.TOTPLockedUntil.Sub(now))
 	}
+	secret, err := Open(c.Key, u.ID, blob)
+	if err != nil {
+		return 0, ErrUnreadable
+	}
+	defer clear(secret)
 	ok, err := c.Users.TOTPAttempt(ctx, u.ID, now)
 	if err != nil {
 		return 0, err
@@ -42,11 +52,6 @@ func (c *Checker) Check(ctx context.Context, u *user.User, blob []byte, code, ip
 	if !ok {
 		return 0, locked(user.TOTPLockDuration)
 	}
-	secret, err := Open(c.Key, u.ID, blob)
-	if err != nil {
-		return 0, err
-	}
-	defer clear(secret)
 	counter, ok := Match(secret, code, now, u.TOTPLastCounter)
 	if !ok {
 		c.Limiter.Fail(ip)
@@ -66,6 +71,8 @@ func WriteError(w http.ResponseWriter, err error) {
 		httpx.Locked(w, l.Minutes)
 	case errors.Is(err, ErrInvalid):
 		httpx.Error(w, http.StatusUnauthorized, "invalid_totp")
+	case errors.Is(err, ErrUnreadable):
+		httpx.Error(w, http.StatusServiceUnavailable, "totp_unreadable")
 	default:
 		httpx.Error(w, http.StatusInternalServerError, "internal")
 	}

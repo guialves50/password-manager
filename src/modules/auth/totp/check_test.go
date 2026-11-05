@@ -94,10 +94,21 @@ func TestCheckReplayRejected(t *testing.T) {
 	}
 }
 
+// Edge case: a secret this server can't open is not the user's fault, so it
+// is reported as unreadable and counts against neither the account nor the IP.
 func TestCheckUndecryptableSecret(t *testing.T) {
-	_, err := newChecker(&fakeAttempt{ok: true}).Check(context.Background(), &user.User{ID: 1}, sealed(t, 2), current(), "ip")
-	if err == nil || errors.Is(err, ErrInvalid) {
-		t.Fatalf("got %v", err)
+	a := &fakeAttempt{ok: true}
+	c := newChecker(a)
+	for range 3 {
+		if _, err := c.Check(context.Background(), &user.User{ID: 1}, sealed(t, 2), current(), "ip"); !errors.Is(err, ErrUnreadable) {
+			t.Fatalf("got %v", err)
+		}
+	}
+	if a.calls != 0 || c.Limiter.LockedFor("ip") != 0 {
+		t.Fatalf("counted: account attempts %d, ip locked %v", a.calls, c.Limiter.LockedFor("ip"))
+	}
+	if _, err := newChecker(a).Check(context.Background(), &user.User{ID: 1}, sealed(t, 1), current(), "ip"); err != nil {
+		t.Fatalf("readable secret after: %v", err)
 	}
 }
 
@@ -109,6 +120,7 @@ func TestWriteError(t *testing.T) {
 	}{
 		{&autherrors.LockedError{Minutes: 3}, 423, `{"error":"locked","minutes":3}`},
 		{ErrInvalid, 401, `{"error":"invalid_totp"}`},
+		{ErrUnreadable, 503, `{"error":"totp_unreadable"}`},
 		{errors.New("x"), 500, `{"error":"internal"}`},
 	} {
 		rec := httptest.NewRecorder()

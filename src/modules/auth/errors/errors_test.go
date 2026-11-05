@@ -24,6 +24,8 @@ func TestMessages(t *testing.T) {
 		ErrInvalidTOTP:            "código 2FA inválido",
 		ErrTOTPEnabled:            "2FA já está ativo",
 		ErrNoPendingTOTP:          "rode 2fa novamente",
+		ErrTOTPUnavailable:        "2FA indisponível: o servidor precisa de PM_SERVER_SECRET",
+		ErrTOTPUnreadable:         "o servidor não consegue ler seu 2FA (PM_SERVER_SECRET mudou ou não foi definido); use recover para desativá-lo",
 		&LockedError{Minutes: 15}: "conta bloqueada, tente novamente em 15 minutos",
 		&LockedError{Minutes: 1}:  "conta bloqueada, tente novamente em 1 minutos",
 	}

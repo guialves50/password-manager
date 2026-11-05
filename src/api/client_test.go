@@ -95,6 +95,8 @@ func TestDoMapsErrorCodes(t *testing.T) {
 		{423, `{"error":"locked"}`, "erro interno"},
 		{503, `{"error":"busy"}`, "servidor ocupado, tente novamente em instantes"},
 		{503, `{"error":"internal"}`, "erro interno"},
+		{503, `{"error":"totp_unavailable"}`, "2FA indisponível: o servidor precisa de PM_SERVER_SECRET"},
+		{503, `{"error":"totp_unreadable"}`, "o servidor não consegue ler seu 2FA (PM_SERVER_SECRET mudou ou não foi definido); use recover para desativá-lo"},
 	}
 	for _, tc := range cases {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

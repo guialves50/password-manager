@@ -25,7 +25,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const usageLine = "uso: pm <serve|register|login|recover>\n"
+const usageLine = "uso: guardian <serve|register|login|recover>\n"
 
 func TestRunDispatch(t *testing.T) {
 	calls := 0
@@ -182,5 +182,20 @@ func TestServeTLSOnly(t *testing.T) {
 	res, err = http.Post("http://"+addr+"/logout", "application/json", nil)
 	if err == nil && res.StatusCode == 401 {
 		t.Fatal("plain http served alongside TLS")
+	}
+}
+
+func TestHomeDispatchesUntilExit(t *testing.T) {
+	var out bytes.Buffer
+	p := &cli.Prompter{In: bufio.NewReader(strings.NewReader("\n  login  \nserve\nlogin\nexit\nlogin\n")), Out: &out}
+	calls := 0
+	home(map[string]cli.Command{"login": func(context.Context, *cli.Prompter) error { calls++; return nil }}, p)
+	if calls != 2 || out.String() != "comando desconhecido\n" {
+		t.Fatalf("calls %d out %q", calls, out.String())
+	}
+	calls = 0
+	home(map[string]cli.Command{"login": func(context.Context, *cli.Prompter) error { calls++; return nil }}, &cli.Prompter{In: bufio.NewReader(strings.NewReader("login\n")), Out: io.Discard})
+	if calls != 1 {
+		t.Fatalf("EOF: calls %d", calls)
 	}
 }

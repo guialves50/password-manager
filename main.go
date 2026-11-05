@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/guialves50/password-manager/src/api"
@@ -24,11 +25,13 @@ import (
 	register "github.com/guialves50/password-manager/src/modules/auth/register/router"
 	items "github.com/guialves50/password-manager/src/modules/vault/items/router"
 	"github.com/guialves50/password-manager/src/server"
+	"github.com/guialves50/password-manager/src/tui"
+	"golang.org/x/term"
 	"gorm.io/gorm"
 )
 
 func usage(stderr io.Writer) int {
-	fmt.Fprintln(stderr, "uso: pm <serve|register|login|recover>")
+	fmt.Fprintln(stderr, "uso: guardian <serve|register|login|recover>")
 	return 2
 }
 
@@ -53,15 +56,57 @@ func start(args []string, p *cli.Prompter, stderr io.Writer) int {
 	default:
 		return usage(stderr)
 	}
-	c, err := api.New(cmp.Or(os.Getenv("PM_SERVER"), "http://127.0.0.1:8080"))
+	routes, err := clientRoutes()
 	if err != nil {
 		fmt.Fprintln(stderr, autherrors.Message(err))
 		return 1
 	}
+	return run(args, routes, p, stderr)
+}
+
+func serverURL() string {
+	return cmp.Or(os.Getenv("PM_SERVER"), "http://127.0.0.1:8080")
+}
+
+func clientRoutes() (map[string]cli.Command, error) {
+	c, err := api.New(serverURL())
+	if err != nil {
+		return nil, err
+	}
 	routes := register.Routes(c)
 	maps.Copy(routes, login.Routes(c, items.Routes(c)))
 	maps.Copy(routes, recover.Routes(c))
-	return run(args, routes, p, stderr)
+	return routes, nil
+}
+
+func home(routes map[string]cli.Command, p *cli.Prompter) {
+	for {
+		line, err := p.Line("")
+		if err != nil {
+			return
+		}
+		switch line = strings.TrimSpace(line); {
+		case line == "exit":
+			return
+		case routes[line] != nil:
+			routes[line](context.Background(), p)
+		case line != "":
+			fmt.Fprintln(p.Out, "comando desconhecido")
+		}
+	}
+}
+
+func interactive(stderr io.Writer) int {
+	routes, err := clientRoutes()
+	if err != nil {
+		fmt.Fprintln(stderr, autherrors.Message(err))
+		return 1
+	}
+	if err := tui.Run(serverURL(), func(p *cli.Prompter) { home(routes, p) }); err != nil {
+		fmt.Fprintln(stderr, "não foi possível abrir a interface:", err)
+		return 1
+	}
+	return 0
 }
 
 func serve(connect func() (*gorm.DB, error), stdout, stderr io.Writer) int {
@@ -120,5 +165,9 @@ func serverSecret(stderr io.Writer) ([]byte, error) {
 }
 
 func main() {
-	os.Exit(start(os.Args[1:], cli.NewTerminalPrompter(), os.Stderr))
+	args := os.Args[1:]
+	if len(args) == 0 && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd())) {
+		os.Exit(interactive(os.Stderr))
+	}
+	os.Exit(start(args, cli.NewTerminalPrompter(), os.Stderr))
 }

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	qrcode "github.com/skip2/go-qrcode"
+
 	"github.com/guialves50/password-manager/src/cli"
 	autherrors "github.com/guialves50/password-manager/src/modules/auth/errors"
 	"github.com/guialves50/password-manager/src/modules/auth/twofactor/dto"
@@ -132,5 +134,36 @@ func TestQRIsSquareWithLightQuietZone(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], "38;5;16m") {
 		t.Fatal("finder pattern missing on second row")
+	}
+}
+
+// TFA-02 AC2: the drawn modules are exactly the QR symbol of the URI.
+func TestQREncodesURI(t *testing.T) {
+	q, err := qrcode.New(uri, qrcode.Low)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.DisableBorder = true
+	want := q.Bitmap()
+	lines, err := QR(uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cell := regexp.MustCompile(`\x1b\[38;5;(\d+)m\x1b\[48;5;(\d+)m▀`)
+	var grid [][]bool
+	for _, l := range lines {
+		top, bot := []bool{}, []bool{}
+		for _, m := range cell.FindAllStringSubmatch(l, -1) {
+			top, bot = append(top, m[1] == "16"), append(bot, m[2] == "16")
+		}
+		grid = append(grid, top, bot)
+	}
+	n := len(want)
+	for y := range n {
+		for x := range n {
+			if grid[y+2][x+2] != want[y][x] {
+				t.Fatalf("module (%d,%d) differs", x, y)
+			}
+		}
 	}
 }

@@ -155,3 +155,15 @@ func TestConfirmIPLockedAfterThreeWrongCodes(t *testing.T) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 }
+
+// Edge case: a malformed code is a wrong guess and counts toward the limit.
+func TestConfirmMalformedCodesCountAsFailures(t *testing.T) {
+	f := &fakeStore{u: pendingUser(t), attemptOK: true}
+	h := NewConfirm(f, checker(f))
+	for range 3 {
+		serve(h, `{"code":"12ab"}`)
+	}
+	if rec := serve(h, code(0)); rec.Code != 423 || errorCode(rec) != "locked" || len(f.activated) != 0 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}

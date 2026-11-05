@@ -20,6 +20,8 @@ import (
 	"github.com/guialves50/password-manager/src/server/httpx"
 )
 
+const MaxDerivations = 4
+
 type Config struct {
 	Secret     []byte
 	AuthParams keys.Params
@@ -35,14 +37,15 @@ func New(db *gorm.DB, cfg Config) http.Handler {
 	sessions := session.NewRepository(db)
 	vault := itemsrepo.New(db)
 	auth := session.Require(sessions, now)
+	kdf := httpx.Gate(MaxDerivations)
 
 	mux := http.NewServeMux()
 	mux.Handle("POST /prelogin", prelogin.New(users, cfg.Secret))
-	mux.Handle("POST /register", register.New(registerrepo.New(db), cfg.AuthParams))
-	mux.Handle("POST /login", login.NewLogin(users, sessions, cfg.AuthParams, now))
+	mux.Handle("POST /register", kdf(register.New(registerrepo.New(db), cfg.AuthParams)))
+	mux.Handle("POST /login", kdf(login.NewLogin(users, sessions, cfg.AuthParams, now)))
 	mux.Handle("POST /logout", auth(login.NewLogout(sessions)))
-	mux.Handle("POST /recover/start", recovery.NewStart(users, cfg.AuthParams, now))
-	mux.Handle("POST /recover/finish", recovery.NewFinish(users, recoverrepo.New(db), cfg.AuthParams, now))
+	mux.Handle("POST /recover/start", kdf(recovery.NewStart(users, cfg.AuthParams, now)))
+	mux.Handle("POST /recover/finish", kdf(recovery.NewFinish(users, recoverrepo.New(db), cfg.AuthParams, now)))
 	mux.Handle("GET /items", auth(items.NewList(vault)))
 	mux.Handle("POST /items", auth(items.NewCreate(vault)))
 	mux.Handle("DELETE /items/{id}", auth(items.NewDelete(vault)))

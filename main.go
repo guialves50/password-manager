@@ -76,7 +76,7 @@ func serve(connect func() (*gorm.DB, error), stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "PM_SERVER_SECRET deve ter 32 bytes em hexadecimal")
 		return 1
 	}
-	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute}
 	if certFile != "" {
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {

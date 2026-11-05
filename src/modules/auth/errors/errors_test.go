@@ -19,6 +19,7 @@ func TestMessages(t *testing.T) {
 		ErrUnreachable:            "não foi possível conectar ao servidor",
 		ErrSessionExpired:         "sessão expirada, faça login novamente",
 		ErrInsecureServer:         "use https para servidores fora do localhost",
+		ErrBusy:                   "servidor ocupado, tente novamente em instantes",
 		&LockedError{Minutes: 15}: "conta bloqueada, tente novamente em 15 minutos",
 		&LockedError{Minutes: 1}:  "conta bloqueada, tente novamente em 1 minutos",
 	}

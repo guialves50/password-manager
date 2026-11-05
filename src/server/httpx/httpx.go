@@ -51,3 +51,18 @@ func Limit(h http.Handler) http.Handler {
 		h.ServeHTTP(w, r)
 	})
 }
+
+func Gate(n int) func(http.Handler) http.Handler {
+	slots := make(chan struct{}, n)
+	return func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			select {
+			case slots <- struct{}{}:
+				defer func() { <-slots }()
+				h.ServeHTTP(w, r)
+			default:
+				Error(w, http.StatusServiceUnavailable, "busy")
+			}
+		})
+	}
+}

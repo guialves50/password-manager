@@ -113,3 +113,34 @@ func TestLimit(t *testing.T) {
 		t.Fatalf("small: %d", rec.Code)
 	}
 }
+
+func TestGateRejectsBeyondLimit(t *testing.T) {
+	release, entered := make(chan struct{}), make(chan struct{})
+	h := Gate(1)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		entered <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	first := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { h.ServeHTTP(first, httptest.NewRequest("POST", "/login", nil)); close(done) }()
+	<-entered
+
+	busy := httptest.NewRecorder()
+	h.ServeHTTP(busy, httptest.NewRequest("POST", "/login", nil))
+	if busy.Code != http.StatusServiceUnavailable || errorCode(t, busy) != "busy" {
+		t.Fatalf("second: %d %q", busy.Code, busy.Body)
+	}
+
+	close(release)
+	<-done
+	if first.Code != http.StatusNoContent {
+		t.Fatalf("first: %d", first.Code)
+	}
+	go func() { <-entered }()
+	again := httptest.NewRecorder()
+	h.ServeHTTP(again, httptest.NewRequest("POST", "/login", nil))
+	if again.Code != http.StatusNoContent {
+		t.Fatalf("slot not released: %d", again.Code)
+	}
+}

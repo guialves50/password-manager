@@ -56,7 +56,6 @@ type UI struct {
 
 const (
 	idleClear = 5 * time.Second
-	checkDraw = time.Second
 	checkShow = 3 * time.Second
 )
 
@@ -284,7 +283,7 @@ func (u *UI) Render(w, h int) []string {
 	case u.art != nil:
 		middle = centered(u.art, w, area)
 	case !u.checkAt.IsZero() && u.now().Sub(u.checkAt) < checkShow:
-		middle = check(min(1, float64(u.now().Sub(u.checkAt))/float64(checkDraw)), w, area)
+		middle = confirmation(u.now().Sub(u.checkAt), u.angle, w, area)
 	case len(u.log) > 0:
 		middle = wrap(u.log, w-4)
 		middle = middle[max(0, len(middle)-area):]

@@ -54,7 +54,7 @@ func normalize(x, y, z float64) [3]float64 {
 	return [3]float64{x / n, y / n, z / n}
 }
 
-func shield(angle float64, w, h int) []string {
+func shieldRaster(angle float64, w, h int) raster {
 	pw, ph := w*2, h*4
 	scale := float64(min(h, 22)*4-1) / (1 - bottom)
 	if 2*scale+1 > float64(pw) {
@@ -105,21 +105,21 @@ func shield(angle float64, w, h int) []string {
 		}
 	}
 
-	out := make([]string, h)
+	r := newRaster(w, h)
 	for row := range h {
-		var b strings.Builder
 		for col := range w {
-			var bits rune
 			var sum float64
 			lit, sides := 0, 0
+			var on []int
 			for dy := range 4 {
 				for dx := range 2 {
-					c := grid[(row*4+dy)*pw+col*2+dx]
+					i := (row*4+dy)*pw + col*2 + dx
+					c := grid[i]
 					if c.lum == 0 {
 						continue
 					}
 					if lit == 0 || c.lum >= (bayer[dy][dx]+0.5)/8*0.8 {
-						bits |= dotBit[dy][dx]
+						on = append(on, i)
 					}
 					lit++
 					sum += c.lum
@@ -129,15 +129,56 @@ func shield(angle float64, w, h int) []string {
 				}
 			}
 			if lit == 0 {
+				continue
+			}
+			for _, i := range on {
+				r.on[i] = true
+			}
+			lum := sum / float64(lit)
+			r.color[row*w+col] = 238 + min(17, int(lum*18))
+			if 2*sides > lit {
+				r.color[row*w+col] = 67 + 6*min(2, int(lum*3))
+			}
+		}
+	}
+	return r
+}
+
+func shield(angle float64, w, h int) []string {
+	return shieldRaster(angle, w, h).lines()
+}
+
+// raster is a braille canvas: on holds the 2x4 dots of every cell, color the
+// 256-color index of each cell.
+type raster struct {
+	w, h  int
+	on    []bool
+	color []int
+}
+
+func newRaster(w, h int) raster {
+	return raster{w: w, h: h, on: make([]bool, w*2*h*4), color: make([]int, w*h)}
+}
+
+func (r raster) lines() []string {
+	pw := r.w * 2
+	out := make([]string, r.h)
+	for row := range r.h {
+		var b strings.Builder
+		for col := range r.w {
+			var bits rune
+			for dy := range 4 {
+				for dx := range 2 {
+					if r.on[(row*4+dy)*pw+col*2+dx] {
+						bits |= dotBit[dy][dx]
+					}
+				}
+			}
+			if bits == 0 {
 				b.WriteByte(' ')
 				continue
 			}
-			lum := sum / float64(lit)
-			color := 238 + min(17, int(lum*18))
-			if 2*sides > lit {
-				color = 67 + 6*min(2, int(lum*3))
-			}
-			fmt.Fprintf(&b, "\x1b[38;5;%dm%c\x1b[0m", color, 0x2800+bits)
+			fmt.Fprintf(&b, "\x1b[38;5;%dm%c\x1b[0m", r.color[row*r.w+col], 0x2800+bits)
 		}
 		out[row] = b.String()
 	}

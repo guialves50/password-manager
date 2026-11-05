@@ -84,8 +84,15 @@ func decodeError(res *http.Response) error {
 		Minutes int    `json:"minutes"`
 	}
 	json.NewDecoder(io.LimitReader(res.Body, 4096)).Decode(&e)
-	if res.StatusCode == http.StatusServiceUnavailable && e.Error == "busy" {
-		return autherrors.ErrBusy
+	if res.StatusCode == http.StatusServiceUnavailable {
+		switch e.Error {
+		case "busy":
+			return autherrors.ErrBusy
+		case "totp_unavailable":
+			return autherrors.ErrTOTPUnavailable
+		case "totp_unreadable":
+			return autherrors.ErrTOTPUnreadable
+		}
 	}
 	if res.StatusCode < 500 {
 		switch e.Error {

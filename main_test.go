@@ -142,7 +142,7 @@ func listening(t *testing.T, stderr io.Writer) string {
 func TestServeHTTP(t *testing.T) {
 	var stderr bytes.Buffer
 	addr := listening(t, &stderr)
-	if !strings.HasPrefix(stderr.String(), "aviso: PM_SERVER_SECRET não definido") || !strings.Contains(stderr.String(), "contas com 2FA não conseguem logar após reiniciar") {
+	if !strings.HasPrefix(stderr.String(), "aviso: PM_SERVER_SECRET não definido") || !strings.Contains(stderr.String(), "o 2FA fica indisponível") {
 		t.Fatalf("no secret warning: %q", stderr.String())
 	}
 	res, err := http.Post("http://"+addr+"/logout", "application/json", nil)
@@ -197,5 +197,18 @@ func TestHomeDispatchesUntilExit(t *testing.T) {
 	home(map[string]cli.Command{"login": func(context.Context, *cli.Prompter) error { calls++; return nil }}, &cli.Prompter{In: bufio.NewReader(strings.NewReader("login\n")), Out: io.Discard})
 	if calls != 1 {
 		t.Fatalf("EOF: calls %d", calls)
+	}
+}
+
+func TestServerConfigDisables2FAWithoutSecret(t *testing.T) {
+	t.Setenv("PM_SERVER_SECRET", "")
+	cfg, err := serverConfig(io.Discard)
+	if err != nil || !cfg.Ephemeral || len(cfg.Secret) != 32 {
+		t.Fatalf("unset: ephemeral %v secret %d err %v", cfg.Ephemeral, len(cfg.Secret), err)
+	}
+	t.Setenv("PM_SERVER_SECRET", strings.Repeat("ab", 32))
+	cfg, err = serverConfig(io.Discard)
+	if err != nil || cfg.Ephemeral || !bytes.Equal(cfg.Secret, bytes.Repeat([]byte{0xab}, 32)) || cfg.AuthParams.Time == 0 {
+		t.Fatalf("set: ephemeral %v err %v", cfg.Ephemeral, err)
 	}
 }

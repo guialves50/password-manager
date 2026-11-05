@@ -167,3 +167,11 @@ func TestConfirmMalformedCodesCountAsFailures(t *testing.T) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 }
+
+func TestSetupUnavailableWithoutStableSecret(t *testing.T) {
+	f := &fakeStore{u: &user.User{ID: 7, Email: "ana@x.com"}}
+	rec := serve(NewSetup(f, nil), "")
+	if rec.Code != 503 || errorCode(rec) != "totp_unavailable" || f.pending != nil {
+		t.Fatalf("%d %s pending=%v", rec.Code, rec.Body, f.pending)
+	}
+}

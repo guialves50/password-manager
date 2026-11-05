@@ -22,6 +22,8 @@ var (
 	ErrInvalidTOTP        = errors.New("código 2FA inválido")
 	ErrTOTPEnabled        = errors.New("2FA já está ativo")
 	ErrNoPendingTOTP      = errors.New("rode 2fa novamente")
+	ErrTOTPUnavailable    = errors.New("2FA indisponível: o servidor precisa de PM_SERVER_SECRET")
+	ErrTOTPUnreadable     = errors.New("o servidor não consegue ler seu 2FA (PM_SERVER_SECRET mudou ou não foi definido); use recover para desativá-lo")
 )
 
 type LockedError struct {
@@ -32,7 +34,7 @@ func (e *LockedError) Error() string {
 	return fmt.Sprintf("conta bloqueada, tente novamente em %d minutos", e.Minutes)
 }
 
-var known = []error{ErrInvalidEmail, ErrPasswordLength, ErrPasswordCase, ErrPasswordMismatch, ErrEmailTaken, ErrInvalidCredentials, ErrInvalidRecovery, ErrUnreachable, ErrSessionExpired, ErrInsecureServer, ErrBusy, ErrTOTPRequired, ErrInvalidTOTP, ErrTOTPEnabled, ErrNoPendingTOTP}
+var known = []error{ErrInvalidEmail, ErrPasswordLength, ErrPasswordCase, ErrPasswordMismatch, ErrEmailTaken, ErrInvalidCredentials, ErrInvalidRecovery, ErrUnreachable, ErrSessionExpired, ErrInsecureServer, ErrBusy, ErrTOTPRequired, ErrInvalidTOTP, ErrTOTPEnabled, ErrNoPendingTOTP, ErrTOTPUnavailable, ErrTOTPUnreadable}
 
 func Message(err error) string {
 	var locked *LockedError

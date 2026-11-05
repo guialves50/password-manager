@@ -119,7 +119,7 @@ func serve(connect func() (*gorm.DB, error), stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "PM_TLS_CERT e PM_TLS_KEY devem ser definidos juntos")
 		return 1
 	}
-	secret, err := serverSecret(stderr)
+	cfg, err := serverConfig(stderr)
 	if err != nil {
 		fmt.Fprintln(stderr, "PM_SERVER_SECRET deve ter 32 bytes em hexadecimal")
 		return 1
@@ -138,7 +138,7 @@ func serve(connect func() (*gorm.DB, error), stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "não foi possível preparar o banco de dados")
 		return 1
 	}
-	srv.Handler = server.New(db, server.Config{Secret: secret, AuthParams: keys.DefaultParams})
+	srv.Handler = server.New(db, cfg)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		fmt.Fprintln(stderr, "não foi possível escutar em", addr)
@@ -154,17 +154,22 @@ func serve(connect func() (*gorm.DB, error), stdout, stderr io.Writer) int {
 	return 1
 }
 
-func serverSecret(stderr io.Writer) ([]byte, error) {
+func serverConfig(stderr io.Writer) (server.Config, error) {
+	cfg := server.Config{AuthParams: keys.DefaultParams}
 	h := os.Getenv("PM_SERVER_SECRET")
 	if h == "" {
-		fmt.Fprintln(stderr, "aviso: PM_SERVER_SECRET não definido; respostas de pré-login para emails não cadastrados mudam a cada reinício e contas com 2FA não conseguem logar após reiniciar (use recover)")
-		return keys.Random(32)
+		fmt.Fprintln(stderr, "aviso: PM_SERVER_SECRET não definido; respostas de pré-login para emails não cadastrados mudam a cada reinício e o 2FA fica indisponível")
+		var err error
+		cfg.Ephemeral = true
+		cfg.Secret, err = keys.Random(32)
+		return cfg, err
 	}
 	b, err := hex.DecodeString(h)
 	if err != nil || len(b) != 32 {
-		return nil, errors.New("invalid server secret")
+		return server.Config{}, errors.New("invalid server secret")
 	}
-	return b, nil
+	cfg.Secret = b
+	return cfg, nil
 }
 
 func main() {

@@ -31,8 +31,13 @@ func load(w http.ResponseWriter, r *http.Request, users store) *user.User {
 	return u
 }
 
+// NewSetup refuses with 503 totp_unavailable when key is nil (no stable server secret).
 func NewSetup(users store, key []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if key == nil {
+			httpx.Error(w, http.StatusServiceUnavailable, "totp_unavailable")
+			return
+		}
 		u := load(w, r, users)
 		if u == nil {
 			return

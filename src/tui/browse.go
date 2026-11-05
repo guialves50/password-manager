@@ -98,7 +98,7 @@ func (u *UI) closeBrowser(picked int) {
 
 // box returns the frame, in cells, of a box centered in a w×h area.
 func box(w, h, rows int) (x0, y0, bw, bh int) {
-	bw, bh = min(w-4, 60), min(h, max(10, rows+6))
+	bw, bh = min(w-4, 76), min(h, max(10, rows+6))
 	return (w - bw) / 2, (h - bh) / 2, bw, bh
 }
 
@@ -172,6 +172,7 @@ func drawBox(w, h, rows int, text []string, hint string) []string {
 	x0, y0, bw, bh := box(w, h, rows)
 	cells := boxRaster(w, h, rows).cells()
 	inner, room := bw-4, bh-4
+	text = wrapLong(text, inner)
 	if len(text) > room {
 		text = append(text[:2:2], text[len(text)-(room-2):]...)
 	}
@@ -202,4 +203,18 @@ func count(n int) string {
 		return "1 item"
 	}
 	return strconv.Itoa(n) + " itens"
+}
+
+// wrapLong breaks lines wider than w (a recovery key must never be cut with
+// "…"); a wrapped line loses its styling, which only plain output lines have.
+func wrapLong(text []string, w int) []string {
+	var out []string
+	for _, t := range text {
+		if visible(t) <= w {
+			out = append(out, t)
+			continue
+		}
+		out = append(out, wrap([]string{ansi.ReplaceAllString(t, "")}, w)...)
+	}
+	return out
 }

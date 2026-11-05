@@ -96,3 +96,36 @@ func TestRecoverErrors(t *testing.T) {
 		}
 	}
 }
+
+// In the TUI the new key is shown inside the box, which only closes on the
+// check after the user presses Enter; a failure dissolves it, then reports.
+func TestRecoverBoxHoldsKeyUntilEnter(t *testing.T) {
+	recover := func(context.Context, dto.Input) (dto.Output, error) { return dto.Output{RecoveryKey: newKey}, nil }
+	p, out := prompter("alice@example.com\n\n", "OLDK-EYXX", "SenhaNova1", "SenhaNova1")
+	var events []string
+	p.Box = func(title string) func(bool) {
+		events = append(events, "open "+title)
+		return func(ok bool) { events = append(events, "close @"+out.String()) }
+	}
+	if err := New(recover)(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0] != "open recuperar conta" || !strings.HasSuffix(events[1], "chave de recuperação: "+newKey+"\nguarde esta chave em local seguro: ela não pode ser exibida novamente\npressione enter quando tiver anotado ") {
+		t.Fatalf("events %q", events)
+	}
+}
+
+func TestRecoverBoxFailure(t *testing.T) {
+	recover := func(context.Context, dto.Input) (dto.Output, error) {
+		return dto.Output{}, autherrors.ErrInvalidRecovery
+	}
+	p, out := prompter("alice@example.com\n", "OLDK-EYXX", "SenhaNova1", "SenhaNova1")
+	var closes []bool
+	p.Box = func(string) func(bool) { return func(ok bool) { closes = append(closes, ok) } }
+	if err := New(recover)(context.Background(), p); err == nil || len(closes) != 1 || closes[0] {
+		t.Fatalf("err %v closes %v", err, closes)
+	}
+	if !strings.HasSuffix(out.String(), autherrors.ErrInvalidRecovery.Error()+"\n") || strings.Contains(out.String(), "pressione enter") {
+		t.Fatalf("out %q", out.String())
+	}
+}

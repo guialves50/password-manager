@@ -14,14 +14,18 @@ type RecoverFunc func(ctx context.Context, in dto.Input) (dto.Output, error)
 
 func New(recover RecoverFunc) cli.Command {
 	return func(ctx context.Context, p *cli.Prompter) error {
+		done := p.OpenBox("recuperar conta")
 		out, err := run(ctx, p, recover)
 		if err != nil {
+			done(false)
 			fmt.Fprintln(p.Out, autherrors.Message(err))
 			return err
 		}
 		fmt.Fprintln(p.Out, "senha mestra redefinida")
 		fmt.Fprintln(p.Out, "chave de recuperação:", out.RecoveryKey)
 		fmt.Fprintln(p.Out, "guarde esta chave em local seguro: ela não pode ser exibida novamente")
+		cli.HoldKey(p)
+		done(true)
 		return nil
 	}
 }

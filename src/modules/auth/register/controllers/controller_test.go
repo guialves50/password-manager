@@ -102,3 +102,37 @@ func TestRegisterErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestRegisterBoxHoldsKeyUntilEnter(t *testing.T) {
+	p, out := prompter("alice@example.com\n\n", "SenhaForte1", "SenhaForte1")
+	var events []string
+	p.Box = func(title string) func(bool) {
+		events = append(events, "open "+title)
+		return func(ok bool) {
+			if ok {
+				events = append(events, "close ok @"+out.String())
+			} else {
+				events = append(events, "close fail")
+			}
+		}
+	}
+	if err := command(&fakeAPI{})(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	key := regexp.MustCompile(`chave de recuperação: [A-Z2-7]{4}(-[A-Z2-7]{4}){7}\nguarde esta chave em local seguro: ela não pode ser exibida novamente\npressione enter quando tiver anotado $`)
+	if len(events) != 2 || events[0] != "open criar conta" || !key.MatchString(events[1]) {
+		t.Fatalf("events %q", events)
+	}
+}
+
+func TestRegisterBoxFailure(t *testing.T) {
+	p, out := prompter("alice@example.com\n", "SenhaForte1", "SenhaForte1")
+	var closes []bool
+	p.Box = func(string) func(bool) { return func(ok bool) { closes = append(closes, ok) } }
+	if err := command(&fakeAPI{err: autherrors.ErrEmailTaken})(context.Background(), p); err == nil || len(closes) != 1 || closes[0] {
+		t.Fatalf("err %v closes %v", err, closes)
+	}
+	if !strings.HasSuffix(out.String(), "email já cadastrado\n") {
+		t.Fatalf("out %q", out.String())
+	}
+}

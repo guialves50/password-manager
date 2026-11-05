@@ -34,6 +34,15 @@ type Prompter struct {
 	Box func(title string) func(ok bool)
 }
 
+// HoldKey keeps a one-time secret (the recovery key) inside the TUI box until
+// the user confirms they wrote it down; the box would wipe it on close.
+// Outside the TUI the key stays in the terminal, so it doesn't wait.
+func HoldKey(p *Prompter) {
+	if p.Box != nil {
+		p.Line("pressione enter quando tiver anotado ")
+	}
+}
+
 // OpenBox is Box, or a no-op outside the TUI.
 func (p *Prompter) OpenBox(title string) func(ok bool) {
 	if p.Box == nil {

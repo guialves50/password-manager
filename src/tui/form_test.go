@@ -178,3 +178,29 @@ func TestPickThenFormKeepsTheBox(t *testing.T) {
 		t.Fatalf("form morphed again from the shield:\n%s", s)
 	}
 }
+
+func TestBoxWrapsLongLinesInsteadOfCutting(t *testing.T) {
+	const key = "ABCD-EFGH-IJKL-MNOP-QRST-UVWX-YZ23-4567"
+	for _, c := range []struct {
+		w    int
+		want []string
+	}{
+		{80, []string{"chave de recuperação: " + key}},                                      // fits whole
+		{50, []string{"chave de recuperação: ABCD-EFGH-IJKL-MNOP-", "QRST-UVWX-YZ23-4567"}}, // wraps, nothing lost
+	} {
+		u, p, clk := uiAt()
+		p.Box("criar conta")
+		clk.t = clk.t.Add(boxMorph)
+		u.Write([]byte("chave de recuperação: " + key + "\n"))
+		box := plain(u.Render(c.w, 30))[6:26]
+		joined := strings.Join(box, "\n")
+		if strings.Contains(joined, "…") {
+			t.Fatalf("width %d: cut with …:\n%s", c.w, joined)
+		}
+		for _, part := range c.want {
+			if !strings.Contains(joined, part) {
+				t.Fatalf("width %d: missing %q in\n%s", c.w, part, joined)
+			}
+		}
+	}
+}

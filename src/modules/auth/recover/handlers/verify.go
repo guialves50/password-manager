@@ -15,7 +15,8 @@ var derive = keys.Derive
 
 type userStore interface {
 	FindByEmail(ctx context.Context, email string) (*user.User, error)
-	RecordFailure(ctx context.Context, id uint64) error
+	Attempt(ctx context.Context, id uint64) (bool, error)
+	ResetFailures(ctx context.Context, id uint64) error
 }
 
 func verify(w http.ResponseWriter, r *http.Request, users userStore, email string, hash []byte, params keys.Params, now time.Time) *user.User {
@@ -35,12 +36,21 @@ func verify(w http.ResponseWriter, r *http.Request, users userStore, email strin
 		httpx.Locked(w, int((d+time.Minute-1)/time.Minute))
 		return nil
 	}
+	ok, err := users.Attempt(ctx, u.ID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal")
+		return nil
+	}
+	if !ok {
+		httpx.Locked(w, int(user.LockDuration/time.Minute))
+		return nil
+	}
 	if subtle.ConstantTimeCompare(derive(hash, u.RecoveryAuthSalt, params), u.RecoveryAuthHash) != 1 {
-		if err := users.RecordFailure(ctx, u.ID); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "internal")
-			return nil
-		}
 		httpx.Error(w, http.StatusUnauthorized, "invalid_recovery")
+		return nil
+	}
+	if err := users.ResetFailures(ctx, u.ID); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal")
 		return nil
 	}
 	return u

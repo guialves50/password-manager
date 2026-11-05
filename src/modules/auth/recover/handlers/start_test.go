@@ -26,7 +26,9 @@ type fakeUsers struct {
 	u        *user.User
 	findErr  error
 	failErr  error
-	failures []uint64
+	raced    bool
+	attempts []uint64
+	resets   []uint64
 }
 
 func (f *fakeUsers) FindByEmail(_ context.Context, email string) (*user.User, error) {
@@ -36,9 +38,14 @@ func (f *fakeUsers) FindByEmail(_ context.Context, email string) (*user.User, er
 	return f.u, nil
 }
 
-func (f *fakeUsers) RecordFailure(_ context.Context, id uint64) error {
-	f.failures = append(f.failures, id)
-	return f.failErr
+func (f *fakeUsers) Attempt(_ context.Context, id uint64) (bool, error) {
+	f.attempts = append(f.attempts, id)
+	return !f.raced, f.failErr
+}
+
+func (f *fakeUsers) ResetFailures(_ context.Context, id uint64) error {
+	f.resets = append(f.resets, id)
+	return nil
 }
 
 func countDerive(t *testing.T) *int {
@@ -89,8 +96,8 @@ func TestStartSuccess(t *testing.T) {
 	rec, _ := start(users, dto.StartRequest{Email: "Alice@example.com ", RecoveryAuthHash: recoveryHash})
 	var resp dto.StartResponse
 	json.Unmarshal(rec.Body.Bytes(), &resp)
-	if rec.Code != http.StatusOK || !bytes.Equal(resp.RecoveryBlob, users.u.RecoveryWrappedKey) || *n != 1 || len(users.failures) != 0 {
-		t.Fatalf("%d %+v derive=%d failures=%v", rec.Code, resp, *n, users.failures)
+	if rec.Code != http.StatusOK || !bytes.Equal(resp.RecoveryBlob, users.u.RecoveryWrappedKey) || *n != 1 || len(users.attempts) != 1 || len(users.resets) != 1 {
+		t.Fatalf("%d %+v derive=%d attempts=%v resets=%v", rec.Code, resp, *n, users.attempts, users.resets)
 	}
 }
 
@@ -98,16 +105,16 @@ func TestStartUnknownEmailRunsDummyDerive(t *testing.T) {
 	n := countDerive(t)
 	users := &fakeUsers{u: seed()}
 	rec, body := start(users, dto.StartRequest{Email: "bob@example.com", RecoveryAuthHash: recoveryHash})
-	if rec.Code != http.StatusUnauthorized || body["error"] != "invalid_recovery" || *n != 1 || len(users.failures) != 0 {
-		t.Fatalf("%d %v derive=%d failures=%v", rec.Code, body, *n, users.failures)
+	if rec.Code != http.StatusUnauthorized || body["error"] != "invalid_recovery" || *n != 1 || len(users.attempts) != 0 {
+		t.Fatalf("%d %v derive=%d attempts=%v", rec.Code, body, *n, users.attempts)
 	}
 }
 
 func TestStartWrongHashRecordsFailure(t *testing.T) {
 	users := &fakeUsers{u: seed()}
 	rec, body := start(users, dto.StartRequest{Email: "alice@example.com", RecoveryAuthHash: wrongHash})
-	if rec.Code != http.StatusUnauthorized || body["error"] != "invalid_recovery" || len(users.failures) != 1 || users.failures[0] != 42 {
-		t.Fatalf("%d %v failures=%v", rec.Code, body, users.failures)
+	if rec.Code != http.StatusUnauthorized || body["error"] != "invalid_recovery" || len(users.attempts) != 1 || users.attempts[0] != 42 || len(users.resets) != 0 {
+		t.Fatalf("%d %v attempts=%v", rec.Code, body, users.attempts)
 	}
 	if _, leaked := body["recovery_blob"]; leaked {
 		t.Fatal("blob returned on failure")
@@ -118,7 +125,7 @@ func TestStartLockedSkipsDerive(t *testing.T) {
 	n := countDerive(t)
 	users := &fakeUsers{u: locked(seed())}
 	rec, body := start(users, dto.StartRequest{Email: "alice@example.com", RecoveryAuthHash: recoveryHash})
-	if rec.Code != http.StatusLocked || body["error"] != "locked" || body["minutes"] != float64(4) || *n != 0 || len(users.failures) != 0 {
+	if rec.Code != http.StatusLocked || body["error"] != "locked" || body["minutes"] != float64(4) || *n != 0 || len(users.attempts) != 0 {
 		t.Fatalf("%d %v derive=%d", rec.Code, body, *n)
 	}
 }
@@ -134,5 +141,17 @@ func TestStartErrors(t *testing.T) {
 	}
 	if rec, body := start(&fakeUsers{u: seed(), failErr: errors.New("db")}, dto.StartRequest{Email: "alice@example.com", RecoveryAuthHash: wrongHash}); rec.Code != http.StatusInternalServerError || body["error"] != "internal" {
 		t.Fatalf("record: %d %v", rec.Code, body)
+	}
+}
+
+func TestStartLockedConcurrentlySkipsDerive(t *testing.T) {
+	n := countDerive(t)
+	users := &fakeUsers{u: seed(), raced: true}
+	rec, body := start(users, dto.StartRequest{Email: "alice@example.com", RecoveryAuthHash: recoveryHash})
+	if rec.Code != http.StatusLocked || body["minutes"] != float64(15) || *n != 0 || len(users.resets) != 0 {
+		t.Fatalf("%d %v derive=%d", rec.Code, body, *n)
+	}
+	if _, leaked := body["recovery_blob"]; leaked {
+		t.Fatal("blob returned while locked")
 	}
 }

@@ -25,7 +25,8 @@ type fakeUsers struct {
 	u        *user.User
 	findErr  error
 	failErr  error
-	failures []uint64
+	raced    bool
+	attempts []uint64
 	resets   []uint64
 }
 
@@ -36,9 +37,9 @@ func (f *fakeUsers) FindByEmail(_ context.Context, email string) (*user.User, er
 	return f.u, nil
 }
 
-func (f *fakeUsers) RecordFailure(_ context.Context, id uint64) error {
-	f.failures = append(f.failures, id)
-	return f.failErr
+func (f *fakeUsers) Attempt(_ context.Context, id uint64) (bool, error) {
+	f.attempts = append(f.attempts, id)
+	return !f.raced, f.failErr
 }
 
 func (f *fakeUsers) ResetFailures(_ context.Context, id uint64) error {
@@ -105,8 +106,8 @@ func TestLoginSuccess(t *testing.T) {
 	if rec.Code != http.StatusOK || resp.Token != "tok" || resp.UserID != 42 || !bytes.Equal(resp.MasterBlob, users.u.MasterWrappedKey) {
 		t.Fatalf("%d %+v", rec.Code, resp)
 	}
-	if *n != 1 || len(users.resets) != 1 || len(users.failures) != 0 {
-		t.Fatalf("derive=%d resets=%v failures=%v", *n, users.resets, users.failures)
+	if *n != 1 || len(users.resets) != 1 || len(users.attempts) != 1 {
+		t.Fatalf("derive=%d resets=%v attempts=%v", *n, users.resets, users.attempts)
 	}
 	if len(sessions.created) != 1 || sessions.created[0] != 42 || !sessions.createdAt.Equal(clock) || !sessions.purgedAt.Equal(clock) {
 		t.Fatalf("sessions %+v", sessions)
@@ -120,7 +121,7 @@ func TestLoginUnknownEmailRunsDummyDerive(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized || body["error"] != "invalid_credentials" || *n != 1 {
 		t.Fatalf("%d %v derive=%d", rec.Code, body, *n)
 	}
-	if len(sessions.created) != 0 || len(users.failures) != 0 {
+	if len(sessions.created) != 0 || len(users.attempts) != 0 {
 		t.Fatal("side effects on unknown email")
 	}
 }
@@ -132,8 +133,8 @@ func TestLoginWrongHashRecordsFailure(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized || body["error"] != "invalid_credentials" {
 		t.Fatalf("%d %v", rec.Code, body)
 	}
-	if len(users.failures) != 1 || users.failures[0] != 42 || len(users.resets) != 0 || len(sessions.created) != 0 {
-		t.Fatalf("failures=%v resets=%v sessions=%v", users.failures, users.resets, sessions.created)
+	if len(users.attempts) != 1 || users.attempts[0] != 42 || len(users.resets) != 0 || len(sessions.created) != 0 {
+		t.Fatalf("attempts=%v resets=%v sessions=%v", users.attempts, users.resets, sessions.created)
 	}
 }
 
@@ -155,8 +156,8 @@ func TestLoginLockedSkipsDerive(t *testing.T) {
 	if rec.Code != http.StatusLocked || body["error"] != "locked" || body["minutes"] != float64(15) {
 		t.Fatalf("%d %v", rec.Code, body)
 	}
-	if *n != 0 || len(users.failures) != 0 || len(sessions.created) != 0 {
-		t.Fatalf("derive=%d failures=%v", *n, users.failures)
+	if *n != 0 || len(users.attempts) != 0 || len(sessions.created) != 0 {
+		t.Fatalf("derive=%d attempts=%v", *n, users.attempts)
 	}
 }
 
@@ -191,5 +192,14 @@ func TestLoginInternalErrors(t *testing.T) {
 		if rec, body := login(users, sessions, dto.Request{Email: "alice@example.com", AuthHash: hash}); rec.Code != http.StatusInternalServerError || body["error"] != "internal" {
 			t.Errorf("%s: %d %v", name, rec.Code, body)
 		}
+	}
+}
+
+func TestLoginLockedConcurrentlySkipsDerive(t *testing.T) {
+	n := countDerive(t)
+	users, sessions := &fakeUsers{u: seed(), raced: true}, &fakeSessions{}
+	rec, body := login(users, sessions, dto.Request{Email: "alice@example.com", AuthHash: authHash})
+	if rec.Code != http.StatusLocked || body["minutes"] != float64(15) || *n != 0 || len(users.resets) != 0 || len(sessions.created) != 0 {
+		t.Fatalf("%d %v derive=%d", rec.Code, body, *n)
 	}
 }

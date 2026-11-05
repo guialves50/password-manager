@@ -68,16 +68,16 @@ func TestFinishSuccess(t *testing.T) {
 	if bytes.Equal(n.RecoveryAuthHash, in.NewRecoveryAuthHash) || !bytes.Equal(n.RecoveryAuthHash, keys.Derive(in.NewRecoveryAuthHash, n.RecoveryAuthSalt, testParams)) {
 		t.Fatal("new recovery auth hash not passed through argon2id")
 	}
-	if len(users.failures) != 0 {
-		t.Fatalf("failures %v", users.failures)
+	if len(users.attempts) != 1 || len(users.resets) != 1 {
+		t.Fatalf("attempts %v resets %v", users.attempts, users.resets)
 	}
 }
 
 func TestFinishWrongHashCountsFailure(t *testing.T) {
 	users, rot := &fakeUsers{u: seed()}, &fakeRotator{}
 	rec, body := finish(users, rot, finishRequest(wrongHash))
-	if rec.Code != http.StatusUnauthorized || body["error"] != "invalid_recovery" || len(users.failures) != 1 || rot.calls != 0 {
-		t.Fatalf("%d %v failures=%v rotate=%d", rec.Code, body, users.failures, rot.calls)
+	if rec.Code != http.StatusUnauthorized || body["error"] != "invalid_recovery" || len(users.attempts) != 1 || rot.calls != 0 {
+		t.Fatalf("%d %v attempts=%v rotate=%d", rec.Code, body, users.attempts, rot.calls)
 	}
 }
 
@@ -129,7 +129,7 @@ func TestFinishValidation(t *testing.T) {
 		in := finishRequest(recoveryHash)
 		mutate(&in)
 		rec, body := finish(users, rot, in)
-		if rec.Code != http.StatusBadRequest || body["error"] != "invalid_request" || rot.calls != 0 || len(users.failures) != 0 {
+		if rec.Code != http.StatusBadRequest || body["error"] != "invalid_request" || rot.calls != 0 || len(users.attempts) != 0 {
 			t.Errorf("%s: %d %v rotate=%d", name, rec.Code, body, rot.calls)
 		}
 	}

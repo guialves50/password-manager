@@ -17,7 +17,7 @@ var derive = keys.Derive
 
 type userStore interface {
 	FindByEmail(ctx context.Context, email string) (*user.User, error)
-	RecordFailure(ctx context.Context, id uint64) error
+	Attempt(ctx context.Context, id uint64) (bool, error)
 	ResetFailures(ctx context.Context, id uint64) error
 }
 
@@ -54,11 +54,16 @@ func NewLogin(users userStore, sessions sessionStore, params keys.Params, now fu
 			httpx.Locked(w, int((d+time.Minute-1)/time.Minute))
 			return
 		}
+		ok, err := users.Attempt(ctx, u.ID)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "internal")
+			return
+		}
+		if !ok {
+			httpx.Locked(w, int(user.LockDuration/time.Minute))
+			return
+		}
 		if subtle.ConstantTimeCompare(derive(in.AuthHash, u.AuthSalt, params), u.AuthHash) != 1 {
-			if err := users.RecordFailure(ctx, u.ID); err != nil {
-				httpx.Error(w, http.StatusInternalServerError, "internal")
-				return
-			}
 			httpx.Error(w, http.StatusUnauthorized, "invalid_credentials")
 			return
 		}

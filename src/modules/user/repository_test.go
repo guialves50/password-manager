@@ -53,15 +53,15 @@ func TestFindByEmail(t *testing.T) {
 	}
 }
 
-func TestRecordFailureLocksOnFifth(t *testing.T) {
+func TestAttemptLocksOnFifth(t *testing.T) {
 	db := database.TestTx(t)
 	repo := user.NewRepository(db)
 	ctx := context.Background()
 	u := seed(t, db, "lock@example.com")
 
 	for i := 1; i <= 4; i++ {
-		if err := repo.RecordFailure(ctx, u.ID); err != nil {
-			t.Fatal(err)
+		if ok, err := repo.Attempt(ctx, u.ID); err != nil || !ok {
+			t.Fatal(ok, err)
 		}
 	}
 	got := reload(t, db, u.ID)
@@ -70,8 +70,8 @@ func TestRecordFailureLocksOnFifth(t *testing.T) {
 	}
 
 	before := time.Now()
-	if err := repo.RecordFailure(ctx, u.ID); err != nil {
-		t.Fatal(err)
+	if ok, err := repo.Attempt(ctx, u.ID); err != nil || !ok {
+		t.Fatal(ok, err)
 	}
 	got = reload(t, db, u.ID)
 	if got.FailedAttempts != 5 || got.LockedUntil == nil {
@@ -82,6 +82,13 @@ func TestRecordFailureLocksOnFifth(t *testing.T) {
 	}
 	if got.LockedFor(time.Now()) <= 14*time.Minute {
 		t.Fatalf("LockedFor = %v", got.LockedFor(time.Now()))
+	}
+
+	if ok, err := repo.Attempt(ctx, u.ID); err != nil || ok {
+		t.Fatalf("attempt while locked: ok=%v err=%v", ok, err)
+	}
+	if got := reload(t, db, u.ID); got.FailedAttempts != 5 {
+		t.Fatalf("locked attempt counted: %d", got.FailedAttempts)
 	}
 
 	if err := repo.ResetFailures(ctx, u.ID); err != nil {
@@ -107,7 +114,7 @@ func TestEmailMustBeLowercase(t *testing.T) {
 	}
 }
 
-func TestRecordFailureRestartsAfterExpiredLock(t *testing.T) {
+func TestAttemptRestartsAfterExpiredLock(t *testing.T) {
 	db := database.TestTx(t)
 	repo := user.NewRepository(db)
 	ctx := context.Background()
@@ -116,8 +123,8 @@ func TestRecordFailureRestartsAfterExpiredLock(t *testing.T) {
 	fail := func(n int) user.User {
 		t.Helper()
 		for range n {
-			if err := repo.RecordFailure(ctx, u.ID); err != nil {
-				t.Fatal(err)
+			if ok, err := repo.Attempt(ctx, u.ID); err != nil || !ok {
+				t.Fatal(ok, err)
 			}
 		}
 		return reload(t, db, u.ID)

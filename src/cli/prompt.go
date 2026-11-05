@@ -19,6 +19,10 @@ type Prompter struct {
 	Out        io.Writer
 	ReadSecret func() ([]byte, error)
 	OnSession  func(*Session)
+	// ShowArt replaces the TUI's center art with lines (nil restores it).
+	ShowArt func(lines []string)
+	// ShowCheck plays the confirmation check animation.
+	ShowCheck func()
 }
 
 func NewTerminalPrompter() *Prompter {

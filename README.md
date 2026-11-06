@@ -31,6 +31,7 @@ Guardian is a Go client/server password manager with an animated terminal UI. Th
 - [Configuration](#configuration)
 - [Project layout](#project-layout)
 - [Development](#development)
+- [Troubleshooting](#troubleshooting)
 - [Security notes and limitations](#security-notes-and-limitations)
 - [Contributing](#contributing)
 
@@ -106,20 +107,13 @@ sed -i.bak "s/^PM_SERVER_SECRET=.*/PM_SERVER_SECRET=$(openssl rand -hex 32)/" .e
 ```
 
 > [!IMPORTANT]
-> Guardian does not read `.env` by itself. Export it into the shell that runs the server:
+> Guardian does not read `.env` by itself. Export it into **every** shell that runs Guardian, both the server and the client:
 >
 > ```bash
 > set -a; source .env; set +a
 > ```
 
-### 3. Run the server
-
-```bash
-go run . serve
-# servidor ouvindo em 127.0.0.1:8080
-```
-
-### Optional: TLS with a self-signed certificate
+### 3. Optional: TLS with a self-signed certificate
 
 ```bash
 mkdir -p certs && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 825 \
@@ -138,14 +132,28 @@ PM_CA_CERT=/absolute/path/to/certs/server.crt
 
 With TLS on, the server accepts HTTPS only. Load `.env` in the client's shell too, so the client uses `https://` and trusts the certificate.
 
-### 4. Build and run the client
+### 4. Run the server
 
 ```bash
+set -a; source .env; set +a
+go run . serve
+# servidor ouvindo em 127.0.0.1:8080
+```
+
+### 5. Build and run the client
+
+In another terminal:
+
+```bash
+set -a; source .env; set +a
 go build -o guardian .
 ./guardian
 ```
 
 Running `guardian` with no arguments in a terminal opens the TUI. Type `register` to create an account, and save the recovery key it shows you: it is displayed only once.
+
+> [!TIP]
+> `./guardian` is a compiled binary. Run `go build -o guardian .` again after pulling changes, or the client keeps running the old code.
 
 ## Usage
 
@@ -240,6 +248,16 @@ test -z "$(gofmt -l .)" && go vet -tags=integration ./... && go build ./... && g
 ```
 
 Integration tests run inside a transaction that is rolled back, so they leave the database unchanged.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+| ------- | ----- | --- |
+| Server prints `não foi possível preparar o banco de dados` | PostgreSQL is not running, often because Docker is stopped. | Start Docker, then `docker compose up -d`. |
+| Server logs `client sent an HTTP request to an HTTPS server` | The client was started without `.env`, so it uses the default `http://` URL. | Run `set -a; source .env; set +a` in the client's shell. |
+| Server logs `tls: bad certificate`, client shows `não foi possível conectar ao servidor` | The client does not trust the self-signed certificate: `PM_CA_CERT` is not set, or the binary is older than `PM_CA_CERT` support. | Load `.env` in the client's shell and rebuild with `go build -o guardian .`. |
+| `2fa` shows `2FA indisponível: o servidor precisa de PM_SERVER_SECRET` | The server was started without `PM_SERVER_SECRET`. | Set it in `.env` and restart the server with `.env` loaded. |
+| Login shows `o servidor não consegue ler seu 2FA` | 2FA was enabled while the server had a different (or no) `PM_SERVER_SECRET`, and that key is gone. | Run `recover` to disable 2FA, then enable it again with `2fa`. |
 
 ## Security notes and limitations
 

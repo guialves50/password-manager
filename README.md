@@ -119,6 +119,25 @@ go run . serve
 # servidor ouvindo em 127.0.0.1:8080
 ```
 
+### Optional: TLS with a self-signed certificate
+
+```bash
+mkdir -p certs && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 825 \
+  -keyout certs/server.key -out certs/server.crt -subj "/CN=localhost" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+```
+
+Then set these in `.env`. `certs/` is git-ignored.
+
+```bash
+PM_TLS_CERT=/absolute/path/to/certs/server.crt
+PM_TLS_KEY=/absolute/path/to/certs/server.key
+PM_SERVER=https://127.0.0.1:8080
+PM_CA_CERT=/absolute/path/to/certs/server.crt
+```
+
+With TLS on, the server accepts HTTPS only. Load `.env` in the client's shell too, so the client uses `https://` and trusts the certificate.
+
 ### 4. Build and run the client
 
 ```bash
@@ -177,6 +196,7 @@ All configuration comes from environment variables.
 | Variable           | Used by | Default | Description |
 | ------------------ | ------- | ------- | ----------- |
 | `PM_SERVER`        | client  | `http://127.0.0.1:8080` | Server URL. Plain `http` is refused for anything other than localhost. |
+| `PM_CA_CERT`       | client  | system roots | PEM certificate to trust instead of the system roots, e.g. a self-signed server certificate. |
 | `PM_ADDR`          | server  | `127.0.0.1:8080` | Listen address. |
 | `PM_SERVER_SECRET` | server  | random per start | 32 bytes in hex. Keeps decoy pre-login answers stable and encrypts TOTP secrets. **Required for 2FA.** |
 | `PM_TLS_CERT`      | server  | — | TLS certificate file. Set together with `PM_TLS_KEY` (TLS 1.2+). |
@@ -227,7 +247,6 @@ Guardian is a personal project and has **not been independently audited**. Known
 
 - **Rate limiting is per process.** The per-IP 2FA limiter lives in memory, so it resets on restart and is not shared between server instances. Account lockouts are stored in the database.
 - **IP is the TCP peer address.** `X-Forwarded-For` is ignored on purpose, so behind a reverse proxy every client shares the proxy's IP.
-- **System TLS roots only.** A server with a self-signed certificate is reported as unreachable.
 - **Client-side search.** Every vault command decrypts the whole vault, which is O(n) in the number of items.
 - **In-memory secrets.** The vault key is zeroed when the session ends, but Go strings, such as decrypted item fields, cannot be wiped from memory.
 

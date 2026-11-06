@@ -18,6 +18,7 @@ var (
 	ErrSessionExpired     = errors.New("sessão expirada, faça login novamente")
 	ErrInsecureServer     = errors.New("use https para servidores fora do localhost")
 	ErrBusy               = errors.New("servidor ocupado, tente novamente em instantes")
+	ErrCACert             = errors.New("PM_CA_CERT não aponta para um certificado PEM válido")
 	ErrTOTPRequired       = errors.New("código 2FA necessário")
 	ErrInvalidTOTP        = errors.New("código 2FA inválido")
 	ErrTOTPEnabled        = errors.New("2FA já está ativo")
@@ -34,7 +35,7 @@ func (e *LockedError) Error() string {
 	return fmt.Sprintf("conta bloqueada, tente novamente em %d minutos", e.Minutes)
 }
 
-var known = []error{ErrInvalidEmail, ErrPasswordLength, ErrPasswordCase, ErrPasswordMismatch, ErrEmailTaken, ErrInvalidCredentials, ErrInvalidRecovery, ErrUnreachable, ErrSessionExpired, ErrInsecureServer, ErrBusy, ErrTOTPRequired, ErrInvalidTOTP, ErrTOTPEnabled, ErrNoPendingTOTP, ErrTOTPUnavailable, ErrTOTPUnreadable}
+var known = []error{ErrInvalidEmail, ErrPasswordLength, ErrPasswordCase, ErrPasswordMismatch, ErrEmailTaken, ErrInvalidCredentials, ErrInvalidRecovery, ErrUnreachable, ErrSessionExpired, ErrInsecureServer, ErrBusy, ErrCACert, ErrTOTPRequired, ErrInvalidTOTP, ErrTOTPEnabled, ErrNoPendingTOTP, ErrTOTPUnavailable, ErrTOTPUnreadable}
 
 func Message(err error) string {
 	var locked *LockedError

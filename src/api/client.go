@@ -3,12 +3,15 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -21,16 +24,28 @@ type Client struct {
 	http *http.Client
 }
 
-// ponytail: system TLS roots only, so self-signed servers fail as unreachable; add PM_CA_CERT if needed
+// New trusts the system TLS roots, or only the certificate in PM_CA_CERT
+// when it is set (a self-signed server certificate, for example).
 func New(rawURL string) (*Client, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Host == "" || !secure(u) {
 		return nil, autherrors.ErrInsecureServer
 	}
-	return &Client{base: strings.TrimRight(u.String(), "/"), http: &http.Client{
+	hc := &http.Client{
 		Timeout:       30 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}}, nil
+	}
+	if path := os.Getenv("PM_CA_CERT"); path != "" {
+		pem, err := os.ReadFile(path)
+		pool := x509.NewCertPool()
+		if err != nil || !pool.AppendCertsFromPEM(pem) {
+			return nil, autherrors.ErrCACert
+		}
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+		hc.Transport = t
+	}
+	return &Client{base: strings.TrimRight(u.String(), "/"), http: hc}, nil
 }
 
 func secure(u *url.URL) bool {

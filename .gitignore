@@ -35,3 +35,6 @@ go.work.sum
 .specs
 .prds
 /guardian
+
+# TLS certificate and private key (never commit)
+/certs/
